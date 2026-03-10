@@ -831,8 +831,6 @@ impl TextView {
     fn paste_image(&self) -> bool {
         let clipboard = self.textview.clipboard();
 
-        if let Some(texture) = clipboard.content() {}
-
         let this = self.clone();
         clipboard.read_texture_async(None::<&gtk::gio::Cancellable>, move |result| {
             if let Ok(Some(texture)) = result {
@@ -988,8 +986,6 @@ impl TextView {
                         keys::F2 => this.char_format(CharFormat::Red),
                         keys::F3 => this.char_format(CharFormat::Yellow),
                         keys::F4 => this.char_format(CharFormat::Blue),
-                        keys::F7 => this.dump(),
-                        keys::F8 => this.turnaround(),
                         keys::Tab | keys::ISO_Left_Tab => this.insert_tab(),
                         keys::KP_Enter | keys::Return => {
                             if this.try_list_continue() {
@@ -1374,19 +1370,7 @@ impl TextView {
         self.buffer.place_cursor(&self.buffer.start_iter());
     }
 
-    fn dump(&self) {
-        println!("Dump! begin -------------------------------------------------------------------");
-        println!("{}", self.to_markdown().as_str());
-        println!("Dump! end   -------------------------------------------------------------------");
-    }
 
-    fn turnaround(&self) {
-        self.buffer.begin_irreversible_action();
-        let markdown = self.to_markdown();
-        self.buffer.assign_markdown(&markdown, true);
-        self.buffer.end_irreversible_action();
-        self.buffer.place_cursor(&self.buffer.start_iter());
-    }
 
     fn insert_tab(&self) {
         if !self.is_editable() {

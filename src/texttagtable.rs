@@ -91,7 +91,8 @@ impl TextTagTable {
 
         let tag_code = TextTagTable::create_tag(Tag::CODE, &table);
         tag_code.set_family(Some("Monospace"));
-        tag_code.set_paragraph_background_rgba(Some(&grey));
+        let code_bg = gdk::RGBA { red: 0.2f32, green: 0.2f32, blue: 0.2f32, alpha: 1.0f32 };
+        tag_code.set_paragraph_background_rgba(Some(&code_bg));
         tag_code.set_left_margin(30);
         tag_code.set_right_margin(30);
         tag_code.set_indent(2);

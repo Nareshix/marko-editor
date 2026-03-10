@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build-linux:
     runs-on: ubuntu-latest
@@ -38,6 +41,7 @@ jobs:
           install: >-
             mingw-w64-ucrt-x86_64-gtk4
             mingw-w64-ucrt-x86_64-rust
+            mingw-w64-ucrt-x86_64-pkgconf
       - shell: msys2 {0}
         run: cargo build --release --no-default-features
       - uses: actions/upload-artifact@v4
@@ -45,4 +49,16 @@ jobs:
           name: marko-windows
           path: target/release/marko-editor.exe
 
-    
+  publish:
+    needs: [build-linux, build-mac, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/marko-linux/marko-editor
+            artifacts/marko-mac/marko-editor
+            artifacts/marko-windows/marko-editor.exe

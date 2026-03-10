@@ -1,94 +1,201 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface>
     <object class="GtkApplicationWindow" id="window">
-        <property name="default-width">400</property>
-        <property name="default-height">480</property>
+        <property name="default-width">900</property>
+        <property name="default-height">600</property>
         <child>
             <object class="GtkPaned" id="outline_splitter">
-            <property name="position">150</property>
+                <property name="position">220</property>
                 <child>
-                <object class="GtkBox" id="outline_widget">
-                    <property name="orientation">vertical</property>
-                    <child>
-                        <object class="GtkBox">
-                            <property name="orientation">vertical</property>
-                            <child>
-                                <object class="GtkCenterBox">
-                                    <child type="start">
-                                        <object class="GtkBox">
-                                            <child>
-                                                <object class="GtkComboBox" id="outline_maxlevel">
-                                                    <property name="model">outline_maxl</property>
-                                                    <property name="active">3</property>
-                                                    <property name="hexpand">1</property>
-                                                    <property name="can-focus">false</property>
-                                                    <property name="has-frame">false</property>
-                                                    <child>
-                                                        <object class="GtkCellRendererText"/>
-                                                        <attributes>
-                                                            <attribute name="text">0</attribute>
-                                                        </attributes>
-                                                    </child>
-                                                </object>
-                                            </child>
-                                        </object>
-                                    </child>
+                    <object class="GtkBox" id="outline_widget">
+                        <property name="orientation">vertical</property>
+                        <child>
+                            <object class="GtkNotebook" id="sidebar_notebook">
+                                <property name="vexpand">true</property>
+                                <property name="show-border">false</property>
 
-                                    <child type="end">
-                                        <object class="GtkBox">
-                                            <child>
-                                                <object class="GtkButton" id="btn_outline_top">
-                                                    <property name="icon-name">go-top-symbolic</property>
-                                                    <property name="tooltip-text" translatable="yes">Scroll to top</property>
-                                                    <property name="can-focus">false</property>
-                                                    <property name="has-frame">false</property>
-                                                </object>
-                                            </child>
-                                            <child>
-                                                <object class="GtkButton" id="btn_outline_bottom">
-                                                    <property name="icon-name">go-bottom-symbolic</property>
-                                                    <property name="tooltip-text" translatable="yes">Scroll to bottom</property>
-                                                    <property name="can-focus">false</property>
-                                                    <property name="has-frame">false</property>
-                                                </object>
-                                            </child>
-                                        </object>
-                                    </child>
-                                </object>
-                            </child>
-                            <child>
-                                <object class="GtkScrolledWindow">
-                                    <property name="vexpand">true</property>
-                                    <property name="hscrollbar-policy">GTK_POLICY_NEVER</property>
-                                    <child>
-                                        <object class="GtkTreeView" id="outline_view">
-                                            <property name="activate-on-single-click">true</property>
-                                            <property name="headers-visible">false</property>
-                                            <child>
-                                                <object class="GtkTreeViewColumn" id="outline_section_col">
-                                                    <property name="title">Section</property>
-                                                    <child>
-                                                        <object class="GtkCellRendererText"
-                                                                id="outline_section_col_rend">
-                                                            <property name="ellipsize">PANGO_ELLIPSIZE_END</property>
-                                                            <property name="weight">700</property>
-                                                            <property name="size-points">12</property>
-                                                        </object>
-                                                        <attributes>
-                                                            <attribute name="text">0</attribute>
-                                                            <attribute name="background-rgba">2</attribute>
-                                                        </attributes>
-                                                    </child>
-                                                </object>
-                                            </child>
-                                        </object>
-                                    </child>
-                                </object>
-                            </child>
-                        </object>
-                    </child>
-                </object>
-            </child>
+                                <child>
+                                    <object class="GtkBox" id="filetree_panel">
+                                        <property name="orientation">vertical</property>
+                                        <child>
+                                            <object class="GtkBox">
+                                                <property name="orientation">horizontal</property>
+                                                <property name="margin-top">2</property>
+                                                <property name="margin-bottom">2</property>
+                                                <child>
+                                                    <object class="GtkLabel" id="lbl_folder_name">
+                                                        <property name="hexpand">true</property>
+                                                        <property name="halign">start</property>
+                                                        <property name="ellipsize">end</property>
+                                                        <property name="margin-start">6</property>
+                                                        <property name="label">No folder open</property>
+                                                    </object>
+                                                </child>
+                                                <child>
+                                                    <object class="GtkButton" id="btn_open_folder">
+                                                        <property name="icon-name">
+                                                            folder-open-symbolic</property>
+                                                        <property name="tooltip-text">Open Folder
+                                                            (Ctrl+K)</property>
+                                                        <property name="has-frame">false</property>
+                                                        <property name="can-focus">false</property>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+                                        <child>
+                                            <object class="GtkSeparator">
+                                                <property name="orientation">horizontal</property>
+                                            </object>
+                                        </child>
+                                        <child>
+                                            <object class="GtkScrolledWindow">
+                                                <property name="vexpand">true</property>
+                                                <property name="hscrollbar-policy">never</property>
+                                                <child>
+                                                    <object class="GtkTreeView" id="file_tree_view">
+                                                        <property name="headers-visible">false</property>
+                                                        <property name="activate-on-single-click">
+                                                            true</property>
+                                                        <property name="show-expanders">true</property>
+                                                        <child>
+                                                            <object class="GtkTreeViewColumn">
+                                                                <child>
+                                                                    <object
+                                                                        class="GtkCellRendererPixbuf"
+                                                                        id="file_icon_rend" />
+                                                                    <attributes>
+                                                                        <attribute name="icon-name">
+                                                                            3</attribute>
+                                                                    </attributes>
+                                                                </child>
+                                                                <child>
+                                                                    <object
+                                                                        class="GtkCellRendererText">
+                                                                        <property name="ellipsize">
+                                                                            end</property>
+                                                                    </object>
+                                                                    <attributes>
+                                                                        <attribute name="text">0</attribute>
+                                                                    </attributes>
+                                                                </child>
+                                                            </object>
+                                                        </child>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </child>
+                                <child type="tab">
+                                    <object class="GtkLabel">
+                                        <property name="label">Files</property>
+                                    </object>
+                                </child>
+
+
+                                <child>
+                                    <object class="GtkBox">
+                                        <property name="orientation">vertical</property>
+                                        <child>
+                                            <object class="GtkCenterBox">
+                                                <child type="start">
+                                                    <object class="GtkBox">
+                                                        <child>
+                                                            <object class="GtkComboBox"
+                                                                id="outline_maxlevel">
+                                                                <property name="model">outline_maxl</property>
+                                                                <property name="active">3</property>
+                                                                <property name="hexpand">1</property>
+                                                                <property name="can-focus">false</property>
+                                                                <property name="has-frame">false</property>
+                                                                <child>
+                                                                    <object
+                                                                        class="GtkCellRendererText" />
+                                                                    <attributes>
+                                                                        <attribute name="text">0</attribute>
+                                                                    </attributes>
+                                                                </child>
+                                                            </object>
+                                                        </child>
+                                                    </object>
+                                                </child>
+                                                <child type="end">
+                                                    <object class="GtkBox">
+                                                        <child>
+                                                            <object class="GtkButton"
+                                                                id="btn_outline_top">
+                                                                <property name="icon-name">
+                                                                    go-top-symbolic</property>
+                                                                <property name="tooltip-text"
+                                                                    translatable="yes">Scroll to top</property>
+                                                                <property name="can-focus">false</property>
+                                                                <property name="has-frame">false</property>
+                                                            </object>
+                                                        </child>
+                                                        <child>
+                                                            <object class="GtkButton"
+                                                                id="btn_outline_bottom">
+                                                                <property name="icon-name">
+                                                                    go-bottom-symbolic</property>
+                                                                <property name="tooltip-text"
+                                                                    translatable="yes">Scroll to
+                                                                    bottom</property>
+                                                                <property name="can-focus">false</property>
+                                                                <property name="has-frame">false</property>
+                                                            </object>
+                                                        </child>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+                                        <child>
+                                            <object class="GtkScrolledWindow">
+                                                <property name="vexpand">true</property>
+                                                <property name="hscrollbar-policy">GTK_POLICY_NEVER</property>
+                                                <child>
+                                                    <object class="GtkTreeView" id="outline_view">
+                                                        <property name="activate-on-single-click">
+                                                            true</property>
+                                                        <property name="headers-visible">false</property>
+                                                        <child>
+                                                            <object class="GtkTreeViewColumn"
+                                                                id="outline_section_col">
+                                                                <property name="title">Section</property>
+                                                                <child>
+                                                                    <object
+                                                                        class="GtkCellRendererText"
+                                                                        id="outline_section_col_rend">
+                                                                        <property name="ellipsize">
+                                                                            PANGO_ELLIPSIZE_END</property>
+                                                                        <property name="weight">700</property>
+                                                                        <property name="size-points">
+                                                                            12</property>
+                                                                    </object>
+                                                                    <attributes>
+                                                                        <attribute name="text">0</attribute>
+                                                                        <attribute
+                                                                            name="background-rgba">2</attribute>
+                                                                    </attributes>
+                                                                </child>
+                                                            </object>
+                                                        </child>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </child>
+                                <child type="tab">
+                                    <object class="GtkLabel">
+                                        <property name="label">Outline</property>
+                                    </object>
+                                </child>
+
+                            </object>
+                        </child>
+                    </object>
+                </child>
 
                 <child>
                     <object class="GtkBox">
@@ -108,7 +215,8 @@
                                         <child>
                                             <object class="GtkButton" id="btn_save">
                                                 <property name="icon-name">document-save-symbolic</property>
-                                                <property name="tooltip-text" translatable="yes">Save</property>
+                                                <property name="tooltip-text" translatable="yes">Save
+                                                    (Ctrl+S)</property>
                                                 <property name="can-focus">false</property>
                                                 <property name="has-frame">false</property>
                                             </object>
@@ -125,7 +233,8 @@
                                         <child>
                                             <object class="GtkButton" id="btn_undo">
                                                 <property name="icon-name">edit-undo-symbolic</property>
-                                                <property name="tooltip-text" translatable="yes">Undo (Ctrl+Z)</property>
+                                                <property name="tooltip-text" translatable="yes">Undo
+                                                    (Ctrl+Z)</property>
                                                 <property name="can-focus">false</property>
                                                 <property name="has-frame">false</property>
                                             </object>
@@ -133,7 +242,8 @@
                                         <child>
                                             <object class="GtkButton" id="btn_redo">
                                                 <property name="icon-name">edit-redo-symbolic</property>
-                                                <property name="tooltip-text" translatable="yes">Redo (Ctrl+Y)</property>
+                                                <property name="tooltip-text" translatable="yes">Redo
+                                                    (Ctrl+Y)</property>
                                                 <property name="can-focus">false</property>
                                                 <property name="has-frame">false</property>
                                             </object>
@@ -146,7 +256,8 @@
                                         <child>
                                             <object class="GtkButton" id="btn_clear">
                                                 <property name="icon-name">edit-clear-all-symbolic</property>
-                                                <property name="tooltip-text" translatable="yes">Clear Format (Ctrl+N)</property>
+                                                <property name="tooltip-text" translatable="yes">Clear
+                                                    Format (Ctrl+N)</property>
                                                 <property name="can-focus">false</property>
                                                 <property name="has-frame">false</property>
                                             </object>
@@ -158,7 +269,8 @@
                                         </child>
                                         <child>
                                             <object class="GtkMenuButton">
-                                                <property name="icon-name">applications-graphics-symbolic</property>
+                                                <property name="icon-name">
+                                                    applications-graphics-symbolic</property>
                                                 <property name="can-focus">false</property>
                                                 <property name="has-frame">false</property>
                                                 <property name="menu-model">format_model</property>
@@ -172,15 +284,18 @@
                                         <child>
                                             <object class="GtkButton" id="btn_bold">
                                                 <property name="icon-name">format-text-bold-symbolic</property>
-                                                <property name="tooltip-text" translatable="yes">BOLD (Ctrl+B)</property>
+                                                <property name="tooltip-text" translatable="yes">Bold
+                                                    (Ctrl+B)</property>
                                                 <property name="can-focus">false</property>
                                                 <property name="has-frame">false</property>
                                             </object>
                                         </child>
                                         <child>
                                             <object class="GtkButton" id="btn_italic">
-                                                <property name="icon-name">format-text-italic-symbolic</property>
-                                                <property name="tooltip-text" translatable="yes">Italic (Ctrl+I)</property>
+                                                <property name="icon-name">
+                                                    format-text-italic-symbolic</property>
+                                                <property name="tooltip-text" translatable="yes">Italic
+                                                    (Ctrl+I)</property>
                                                 <property name="can-focus">false</property>
                                                 <property name="has-frame">false</property>
                                             </object>
@@ -188,15 +303,18 @@
                                         <child>
                                             <object class="GtkButton" id="btn_code">
                                                 <property name="icon-name">text-html-symbolic</property>
-                                                <property name="tooltip-text" translatable="yes">Code (Ctrl+T)</property>
+                                                <property name="tooltip-text" translatable="yes">Code
+                                                    (Ctrl+T)</property>
                                                 <property name="can-focus">false</property>
                                                 <property name="has-frame">false</property>
                                             </object>
                                         </child>
                                         <child>
                                             <object class="GtkButton" id="btn_strike">
-                                                <property name="icon-name">format-text-strikethrough-symbolic</property>
-                                                <property name="tooltip-text" translatable="yes">Strike Through (Ctrl+D)</property>
+                                                <property name="icon-name">
+                                                    format-text-strikethrough-symbolic</property>
+                                                <property name="tooltip-text" translatable="yes">Strikethrough
+                                                    (Ctrl+D)</property>
                                                 <property name="can-focus">false</property>
                                                 <property name="has-frame">false</property>
                                             </object>
@@ -209,7 +327,8 @@
                                         <child>
                                             <object class="GtkButton" id="btn_link">
                                                 <property name="icon-name">insert-link-symbolic</property>
-                                                <property name="tooltip-text" translatable="yes">Link or image reference (Ctrl+L)</property>
+                                                <property name="tooltip-text" translatable="yes">Link
+                                                    or image (Ctrl+L)</property>
                                                 <property name="can-focus">false</property>
                                                 <property name="has-frame">false</property>
                                             </object>
@@ -226,14 +345,16 @@
                                         <child>
                                             <object class="GtkButton" id="btn_search">
                                                 <property name="icon-name">system-search-symbolic</property>
-                                                <property name="tooltip-text" translatable="yes">Search (Ctrl+F)</property>
+                                                <property name="tooltip-text" translatable="yes">Search
+                                                    (Ctrl+F)</property>
                                                 <property name="can-focus">false</property>
                                                 <property name="has-frame">false</property>
                                             </object>
                                         </child>
                                         <child>
                                             <object class="GtkMenuButton" id="btn_menu">
-                                                <property name="icon-name">preferences-desktop-symbolic</property>
+                                                <property name="icon-name">
+                                                    preferences-desktop-symbolic</property>
                                                 <property name="can-focus">false</property>
                                                 <property name="has-frame">false</property>
                                                 <property name="menu-model">menu</property>
@@ -248,7 +369,6 @@
                                 <property name="orientation">vertical</property>
                             </object>
                         </child>
-
                     </object>
                 </child>
             </object>
@@ -271,8 +391,12 @@
         </section>
         <section>
             <item>
-                <attribute name="label" translatable="yes">_Open ...                           </attribute>
+                <attribute name="label" translatable="yes">_Open File ...</attribute>
                 <attribute name="action">win.open</attribute>
+            </item>
+            <item>
+                <attribute name="label" translatable="yes">Open _Folder ...</attribute>
+                <attribute name="action">win.open_folder</attribute>
             </item>
         </section>
         <section></section>
@@ -303,7 +427,6 @@
                                 <property name="pixels_inside_wrap">1</property>
                                 <property name="wrap_mode">word</property>
                             </object>
-
                         </child>
                     </object>
                 </child>
@@ -314,19 +437,22 @@
                         <child>
                             <object class="GtkButton" id="btn_dlg_md_load_markdown">
                                 <property name="label" translatable="yes">Load MD</property>
-                                <property name="tooltip-text" translatable="yes">Load markdown from current document</property>
+                                <property name="tooltip-text" translatable="yes">Load markdown from
+                                    current document</property>
                             </object>
                         </child>
                         <child>
                             <object class="GtkButton" id="btn_dlg_md_insert_markdown">
                                 <property name="label" translatable="yes">Insert MD</property>
-                                <property name="tooltip-text" translatable="yes">Insert markdown at cursor position</property>
+                                <property name="tooltip-text" translatable="yes">Insert markdown at
+                                    cursor position</property>
                             </object>
                         </child>
                         <child>
                             <object class="GtkButton" id="btn_dlg_md_replace_markdown">
                                 <property name="label" translatable="yes">Replace MD</property>
-                                <property name="tooltip-text" translatable="yes">Delete document and insert markdown</property>
+                                <property name="tooltip-text" translatable="yes">Delete document and
+                                    insert markdown</property>
                             </object>
                         </child>
                         <child>
@@ -340,6 +466,7 @@
             </object>
         </child>
     </object>
+
     <menu id="menu">
         <section>
             <item>
@@ -440,7 +567,7 @@
 
     <object class="GtkListStore" id="outline_maxl">
         <columns>
-            <column type="gchararray"/>
+            <column type="gchararray" />
         </columns>
         <data>
             <row>

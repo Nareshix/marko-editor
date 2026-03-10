@@ -385,6 +385,8 @@ pub struct TextView {
     image_widgets: Rc<RefCell<HashMap<String, (gdk::Texture, i32, i32)>>>,
     anchor_registry: Rc<RefCell<Vec<AnchorEntry>>>,
     internal_clipboard: Rc<RefCell<Option<AnchorKind>>>,
+    autosave_timer: Rc<RefCell<Option<glib::SourceId>>>,
+    autosave_cb: Rc<RefCell<Option<Box<dyn Fn()>>>>,
 }
 #[derive(Clone)]
 pub enum AnchorKind {
@@ -398,7 +400,123 @@ struct AnchorEntry {
     kind: AnchorKind,
     last_offset: i32,
 }
+
 impl TextView {
+    pub fn set_autosave_cb<F: Fn() + 'static>(&self, f: F) {
+        *self.autosave_cb.borrow_mut() = Some(Box::new(f));
+    }
+
+    pub fn new() -> Self {
+        let ui_src = include_str!("textview.ui");
+        let b = gtk::Builder::new();
+        b.add_from_string(ui_src).expect("Couldn't add from string");
+
+        let tags = Rc::new(TextTagManager::new());
+        let buffer = gtk::TextBuffer::new(Some(tags.table()));
+
+        let textview: gtk::TextView = builder_get!(b("textview"));
+        textview.set_top_margin(MARGIN);
+        textview.set_bottom_margin(MARGIN);
+        textview.set_left_margin(MARGIN);
+        textview.set_right_margin(MARGIN);
+        textview.set_wrap_mode(gtk::WrapMode::Word);
+        textview.set_pixels_above_lines(2);
+        textview.set_pixels_below_lines(2);
+        textview.set_pixels_inside_wrap(1);
+        textview.set_has_tooltip(true);
+
+        let link_edit = Rc::new(LinkEdit::new(&b));
+        let search_bar = Rc::new(SearchBar::new(&b, {
+            let t = textview.clone();
+            move || -> gtk::TextView { t.clone() }
+        }));
+
+        let b: gtk::Box = builder_get!(b("container"));
+        let top_level = b.upcast::<gtk::Widget>();
+
+        let activate_link_cb: OpenLinkCb = Rc::new(RefCell::new(Box::new(|_: &str| {})));
+
+        let link_start = buffer.create_mark(None, &buffer.start_iter(), true);
+        let link_end = buffer.create_mark(None, &buffer.start_iter(), false);
+
+        // Autosave: debounced 2s after last keystroke
+        let autosave_timer: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+        let autosave_cb: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+
+        buffer.connect_changed({
+            let timer = autosave_timer.clone();
+            let cb = autosave_cb.clone();
+            move |_| {
+                // Cancel any pending save
+                if let Some(id) = timer.borrow_mut().take() {
+                    glib::source_remove(id);
+                }
+                // Restart the 2s countdown
+                let timer2 = timer.clone();
+                let cb2 = cb.clone();
+                let id: glib::SourceId = glib::timeout_add_seconds_local(2, move || {
+                    timer2.borrow_mut().take();
+                    if let Some(f) = cb2.borrow().as_ref() {
+                        f();
+                    }
+                    glib::Continue(false)
+                });
+                *timer.borrow_mut() = Some(id);
+            }
+        });
+
+        let this = Self {
+            buffer,
+            tags,
+            textview,
+            link_edit,
+            search_bar,
+            top_level,
+            activate_link_cb,
+            is_editable: Rc::new(RefCell::from(true)),
+            link_start,
+            link_end,
+            colors: Rc::new(RefCell::new(Colors::new())),
+            is_renumbering: Rc::new(RefCell::new(false)),
+            image_widgets: Rc::new(RefCell::new(HashMap::new())),
+            anchor_registry: Rc::new(RefCell::new(Vec::new())),
+            internal_clipboard: Rc::new(RefCell::new(None)),
+            autosave_timer,
+            autosave_cb,
+        };
+
+        this.top_level.add_controller(&this.get_key_press_handler_background());
+        this.textview.add_controller(&this.get_key_press_handler());
+        this.textview.add_controller(&this.get_mouse_release_handler());
+        this.textview.add_controller(&this.get_drag_handler());
+        this.textview.add_controller(&this.get_drop_handler());
+        this.textview.set_buffer(Some(&this.buffer));
+
+        this.textview.connect_query_tooltip({
+            |t, x, y, keyboard_mode, tooltip| t.tooltip(x, y, keyboard_mode, tooltip)
+        });
+        this.textview.connect_move_cursor({
+            let tags = this.tags.clone();
+            move |textview, _, _, _| tags.move_cursor(textview)
+        });
+
+        this.link_edit.set_accept_link_cb(connect_fwd1!(this.accept_link()));
+
+        this.buffer
+            .connect_local("insert-text", true, connect_fwd1!(this.buffer_do_insert_text()))
+            .unwrap();
+
+        this.buffer.connect_changed({
+            let this2 = this.clone();
+            move |_| {
+                this2.reapply_list_tags();
+            }
+        });
+
+        this.update_colors(false);
+
+        this
+    }
     fn restore_anchors(&self) {
         let buffer = &self.buffer;
 
@@ -557,87 +675,6 @@ impl TextView {
         });
 
         drawing.upcast::<gtk::Widget>()
-    }
-    pub fn new() -> Self {
-        let ui_src = include_str!("textview.ui");
-        let b = gtk::Builder::new();
-        b.add_from_string(ui_src).expect("Couldn't add from string");
-
-        let tags = Rc::new(TextTagManager::new());
-        let buffer = gtk::TextBuffer::new(Some(tags.table()));
-
-        let textview: gtk::TextView = builder_get!(b("textview"));
-        textview.set_top_margin(MARGIN);
-        textview.set_bottom_margin(MARGIN);
-        textview.set_left_margin(MARGIN);
-        textview.set_right_margin(MARGIN);
-        textview.set_wrap_mode(gtk::WrapMode::Word);
-        textview.set_pixels_above_lines(2);
-        textview.set_pixels_below_lines(2);
-        textview.set_pixels_inside_wrap(1);
-        textview.set_has_tooltip(true);
-
-        let link_edit = Rc::new(LinkEdit::new(&b));
-        let search_bar = Rc::new(SearchBar::new(&b, {
-            let t = textview.clone();
-            move || -> gtk::TextView { t.clone() }
-        }));
-
-        let b: gtk::Box = builder_get!(b("container"));
-        let top_level = b.upcast::<gtk::Widget>();
-
-        let activate_link_cb: OpenLinkCb = Rc::new(RefCell::new(Box::new(|_: &str| {})));
-
-        let link_start = buffer.create_mark(None, &buffer.start_iter(), true);
-        let link_end = buffer.create_mark(None, &buffer.start_iter(), false);
-
-        let this = Self {
-            buffer,
-            tags,
-            textview,
-            link_edit,
-            search_bar,
-            top_level,
-            activate_link_cb,
-            is_editable: Rc::new(RefCell::from(true)),
-            link_start,
-            link_end,
-            colors: Rc::new(RefCell::new(Colors::new())),
-            is_renumbering: Rc::new(RefCell::new(false)),
-            image_widgets: Rc::new(RefCell::new(HashMap::new())),
-            anchor_registry: Rc::new(RefCell::new(Vec::new())),
-            internal_clipboard: Rc::new(RefCell::new(None)),
-        };
-        this.top_level.add_controller(&this.get_key_press_handler_background());
-        this.textview.add_controller(&this.get_key_press_handler());
-        this.textview.add_controller(&this.get_mouse_release_handler());
-        this.textview.add_controller(&this.get_drag_handler());
-        this.textview.add_controller(&this.get_drop_handler());
-        this.textview.set_buffer(Some(&this.buffer));
-
-        this.textview.connect_query_tooltip({
-            |t, x, y, keyboard_mode, tooltip| t.tooltip(x, y, keyboard_mode, tooltip)
-        });
-        this.textview.connect_move_cursor({
-            let tags = this.tags.clone();
-            move |textview, _, _, _| tags.move_cursor(textview)
-        });
-
-        this.link_edit.set_accept_link_cb(connect_fwd1!(this.accept_link()));
-
-        this.buffer
-            .connect_local("insert-text", true, connect_fwd1!(this.buffer_do_insert_text()))
-            .unwrap();
-
-        this.buffer.connect_changed({
-            let this2 = this.clone();
-            move |_| {
-                this2.reapply_list_tags();
-            }
-        });
-        this.update_colors(false);
-
-        this
     }
 
     fn reapply_list_tags(&self) {

@@ -1,6 +1,6 @@
 #[cfg(feature = "default")]
 extern crate x11;
-
+use chrono;
 use gtk::gio::SimpleAction;
 use gtk::glib;
 use gtk::prelude::*;
@@ -31,6 +31,89 @@ menubutton {
 }
 "#;
 
+fn build_file_tree_model(root: &Path) -> gtk::TreeStore {
+    // col 0: display name, col 1: full path, col 2: is_dir (bool), col 3: icon name
+    let store = gtk::TreeStore::new(&[
+        glib::GString::static_type(),
+        glib::GString::static_type(),
+        bool::static_type(),
+        glib::GString::static_type(),
+    ]);
+    populate_tree(&store, None, root);
+    store
+}
+
+fn populate_tree(store: &gtk::TreeStore, parent: Option<&gtk::TreeIter>, dir: &Path) {
+    let mut entries: Vec<_> = match std::fs::read_dir(dir) {
+        Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+        Err(_) => return,
+    };
+
+    // Sort: dirs first, then files, both alphabetically
+    entries.sort_by(|a, b| {
+        let a_is_dir = a.path().is_dir();
+        let b_is_dir = b.path().is_dir();
+        match (a_is_dir, b_is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.file_name().cmp(&b.file_name()),
+        }
+    });
+
+    for entry in entries {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        // Skip hidden files/dirs
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let is_dir = path.is_dir();
+
+        // For files: only show .md and .markdown
+        if !is_dir {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext != "md" && ext != "markdown" {
+                continue;
+            }
+        }
+
+        // Skip empty dirs (no md files anywhere inside)
+        if is_dir && !dir_has_md(&path) {
+            continue;
+        }
+
+        let icon = if is_dir { "folder-symbolic" } else { "text-x-generic-symbolic" };
+        let path_str = path.to_string_lossy().to_string();
+
+        let iter = store.append(parent);
+        store.set(&iter, &[(0, &name), (1, &path_str), (2, &is_dir), (3, &icon)]);
+
+        if is_dir {
+            populate_tree(store, Some(&iter), &path);
+        }
+    }
+}
+
+fn dir_has_md(dir: &Path) -> bool {
+    let Ok(rd) = std::fs::read_dir(dir) else { return false };
+    for entry in rd.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.is_dir() {
+            if dir_has_md(&path) {
+                return true;
+            }
+        } else {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext == "md" || ext == "markdown" {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 struct Ui {
     window: gtk::ApplicationWindow,
     text_view_container: gtk::Box,
@@ -53,6 +136,9 @@ struct Ui {
     btn_outline_top: gtk::Button,
     btn_outline_bottom: gtk::Button,
     dlg_md: gtk::Dialog,
+    file_tree_view: gtk::TreeView,
+    lbl_folder_name: gtk::Label,
+    btn_open_folder: gtk::Button,
 }
 
 #[derive(Clone)]
@@ -62,6 +148,7 @@ pub struct MainWindow {
     ui: Rc<Ui>,
     css: gtk::CssProvider,
     file: Rc<RefCell<Option<PathBuf>>>,
+    open_folder: Rc<RefCell<Option<PathBuf>>>,
 }
 
 impl MainWindow {
@@ -92,6 +179,9 @@ impl MainWindow {
             btn_outline_top: builder_get!(b("btn_outline_top")),
             btn_outline_bottom: builder_get!(b("btn_outline_bottom")),
             dlg_md: builder_get!(b("dlg_md")),
+            file_tree_view: builder_get!(b("file_tree_view")),
+            lbl_folder_name: builder_get!(b("lbl_folder_name")),
+            btn_open_folder: builder_get!(b("btn_open_folder")),
         });
         ui.text_view_container.append(ui.text_view.get_widget());
 
@@ -103,6 +193,7 @@ impl MainWindow {
             ui,
             css,
             file: Rc::new(RefCell::new(None)),
+            open_folder: Rc::new(RefCell::new(None)),
         };
 
         this.ui.text_view.set_activate_link_cb({
@@ -110,6 +201,11 @@ impl MainWindow {
             move |link| {
                 gtk::show_uri(Some(&w), link, gdk::CURRENT_TIME);
             }
+        });
+
+        this.ui.text_view.set_autosave_cb({
+            let s = this.clone();
+            move || s.save_silent()
         });
 
         this.ui.btn_save.connect_clicked(connect!(this.btn_save_clicked()));
@@ -126,6 +222,23 @@ impl MainWindow {
         this.ui.btn_search.connect_clicked(connect!(t.open_search()));
         this.ui.btn_outline_top.connect_clicked(connect!(t.scroll_to_top_bottom(true)));
         this.ui.btn_outline_bottom.connect_clicked(connect!(t.scroll_to_top_bottom(false)));
+
+        this.ui.btn_open_folder.connect_clicked(connect!(this.btn_open_folder_clicked()));
+
+        this.ui.file_tree_view.connect_row_activated({
+            let s = this.clone();
+            move |tree, path, _col| {
+                let model = tree.model().unwrap();
+                if let Some(iter) = model.iter(path) {
+                    let is_dir = model.get(&iter, 2).get::<bool>().unwrap_or(false);
+                    if !is_dir {
+                        let file_path = model.get(&iter, 1).get::<String>().unwrap();
+                        s.open_file(&PathBuf::from(file_path));
+                    }
+                    // dirs: GtkTreeView handles expand/collapse natively
+                }
+            }
+        });
 
         this.ui.outline_maxlevel.connect_changed(connect!(this.update_outline()));
         this.ui.outline_view.connect_row_activated({
@@ -147,6 +260,7 @@ impl MainWindow {
         this.setup_action("new", connect_action_plain!(this.btn_new_clicked()));
         this.setup_action("home", connect_action_plain!(this.act_open_startpage()));
         this.setup_action("open", connect_action_plain!(this.btn_open_clicked()));
+        this.setup_action("open_folder", connect_action_plain!(this.btn_open_folder_clicked()));
 
         this.setup_action("header_1", connect_action_plain!(t.par_format(Some(ParFormat::H1))));
         this.setup_action("header_2", connect_action_plain!(t.par_format(Some(ParFormat::H2))));
@@ -177,6 +291,53 @@ impl MainWindow {
         this
     }
 
+    fn btn_open_folder_clicked(&self) {
+        let dlg = FileChooserDialog::new(
+            Some("Open Folder"),
+            Some(&self.ui.window),
+            FileChooserAction::SelectFolder,
+            &[("Open", ResponseType::Ok), ("Cancel", ResponseType::Cancel)],
+        );
+        dlg.connect_response({
+            let s = self.clone();
+            move |dlg, response| {
+                if response == ResponseType::Ok {
+                    if let Some(file) = dlg.file() {
+                        if let Some(path) = file.path() {
+                            s.open_folder(&path);
+                        }
+                    }
+                }
+                dlg.close();
+            }
+        });
+        dlg.show();
+    }
+
+    fn open_folder(&self, path: &Path) {
+        let model = build_file_tree_model(path);
+        self.ui.file_tree_view.set_model(Some(&model));
+
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+        self.ui.lbl_folder_name.set_text(&name);
+
+        *self.open_folder.borrow_mut() = Some(path.to_path_buf());
+
+        let _ = self.settings.store("config", "open_folder", path.to_str().unwrap_or(""));
+
+        // Auto-expand first level only
+        let tree = &self.ui.file_tree_view;
+        if let Some(model) = tree.model() {
+            if let Some(iter) = model.iter_first() {
+                let tp = model.path(&iter);
+                tree.expand_row(&tp, false);
+            }
+        }
+    }
+
     pub fn prepare_show(&self) {
         self.ui.window.realize();
         self.restore_geometry();
@@ -190,7 +351,6 @@ impl MainWindow {
             priority: u32,
         ) {
             widget.style_context().add_provider(provider, priority);
-
             let mut child = widget.first_child();
             while let Some(c) = &child {
                 apply_css(c, provider, priority);
@@ -199,13 +359,11 @@ impl MainWindow {
         }
         apply_css(&self.ui.window, &css, u32::max_value());
 
-        // the combobox should look like a button, since it contains one we style it like the others
         fn css_combo_to_flat<W: IsA<gtk::Widget>>(widget: &W) {
             if widget.css_classes().contains(&glib::GString::from("combo")) {
                 widget.remove_css_class("combo");
                 widget.add_css_class("flat");
             }
-
             let mut child = widget.first_child();
             while let Some(c) = &child {
                 css_combo_to_flat(c);
@@ -217,7 +375,6 @@ impl MainWindow {
 
     pub fn show(&self) {
         self.ui.window.show();
-
         self.ui.text_view.grab_focus();
 
         let p = self.file.borrow().clone();
@@ -227,8 +384,13 @@ impl MainWindow {
             self.act_open_startpage();
         }
 
-        // ToDo: still not working 100% reliably...
-        // we call restore_geometry again, since sometimes it doesn't work before show...
+        // Restore last open folder
+        if let Some(folder) = self.settings.get("config", "open_folder") {
+            if !folder.is_empty() {
+                self.open_folder(&PathBuf::from(folder));
+            }
+        }
+
         self.restore_geometry();
     }
 
@@ -313,7 +475,6 @@ impl MainWindow {
     }
 
     fn save_file<F: Fn(&Self) + 'static>(&self, and_then: Rc<F>) {
-        // and_then might need the file.borrow...
         let p = self.file.borrow().clone();
         if let Some(filename) = p {
             if self.write_file(&filename).is_ok() {
@@ -375,43 +536,29 @@ impl MainWindow {
     }
 
     fn close_file<F: Fn(&Self) + 'static>(&self, and_then: Rc<F>) {
-        if !self.ui.text_view.modified() {
-            and_then(self);
-            return;
-        }
-
-        let dlg = gtk::MessageDialog::new(
-            Some(&self.ui.window),
-            gtk::DialogFlags::MODAL
-                | gtk::DialogFlags::DESTROY_WITH_PARENT
-                | gtk::DialogFlags::USE_HEADER_BAR,
-            gtk::MessageType::Question,
-            gtk::ButtonsType::None,
-            "Save current document?",
-        );
-        let b = dlg.add_button("Discard", gtk::ResponseType::No).downcast::<gtk::Button>().unwrap();
-        b.set_icon_name("user-trash-symbolic");
-        b.set_css_classes(vec!["destructive-action"].as_ref());
-        dlg.add_button("Cancel", gtk::ResponseType::Cancel);
-        let b = dlg.add_button("Save", gtk::ResponseType::Yes).downcast::<gtk::Button>().unwrap();
-        b.set_css_classes(vec!["suggested-action"].as_ref());
-        b.grab_focus();
-
-        dlg.connect_response({
-            let s = self.clone();
-            move |dlg, r| {
-                match r {
-                    ResponseType::Cancel => {}
-                    ResponseType::Yes => s.save_file(and_then.to_owned()),
-                    ResponseType::No => and_then(&s),
-                    _ => {}
+        if self.ui.text_view.modified() {
+            let p = self.file.borrow().clone();
+            if let Some(filename) = p {
+                let _ = self.write_file(&filename);
+            } else {
+                // New unsaved doc — auto-create with timestamp
+                let path = dirs::document_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(format!("note_{}.md", chrono::Local::now().format("%Y%m%d_%H%M%S")));
+                if self.write_file(&path).is_ok() {
+                    self.set_filename(&path);
                 }
-                dlg.close();
             }
-        });
-        dlg.show();
+        }
+        and_then(self);
     }
 
+    fn save_silent(&self) {
+        let p = self.file.borrow().clone();
+        if let Some(filename) = p {
+            let _ = self.write_file(&filename);
+        }
+    }
     fn set_filename(&self, filename: &Path) {
         self.file.replace(Some(filename.to_path_buf()));
         self.set_title();
@@ -501,6 +648,7 @@ impl MainWindow {
     }
 
     fn close(&self) {
+        self.save_silent(); 
         self.close_file(Rc::new(|s: &MainWindow| s.ui.window.application().unwrap().quit()));
     }
 
@@ -556,7 +704,6 @@ impl MainWindow {
             move |_| {
                 let text = s.ui.text_view.to_markdown();
                 let buffer = t.buffer();
-                buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
                 buffer.delete(&mut buffer.start_iter(), &mut buffer.end_iter());
                 buffer.insert(&mut buffer.start_iter(), text.as_str());
             }
@@ -642,7 +789,6 @@ impl MainWindow {
     fn toggle_dark_theme(&self) {
         if let Some(settings) = gtk::Settings::default() {
             settings.set_gtk_theme_name(Some("Adwaita"));
-
             let current = settings.is_gtk_application_prefer_dark_theme();
             settings.set_gtk_application_prefer_dark_theme(!current);
             self.ui.text_view.update_colors(!current);

@@ -96,21 +96,14 @@ impl TextBufferExt2 for gtk::TextBuffer {
     }
 
     fn create_image_tag(&self, link: &str) -> gtk::TextTag {
-        // ToDo: this lookup might be slow
         let name = format!("{}{}", IMAGE_START, link);
         let table = &self.tag_table();
         if let Some(tag) = table.lookup(&name) {
             tag
         } else {
-            static GREEN: gdk::RGBA =
-                gdk::RGBA { red: 0f32, green: 0.75f32, blue: 0f32, alpha: 1f32 };
-            let link_tag = TextTagTable::create_tag(&name, table);
-            link_tag.set_underline(gtk::pango::Underline::Single);
-            link_tag.set_foreground_rgba(Some(&GREEN));
-            link_tag
+            TextTagTable::create_tag(&name, table)
         }
     }
-
     fn get_image_at_iter(&self, iter: &TextIter) -> Option<(String, gtk::TextTag)> {
         let tags = iter.tags();
         for tag in tags {

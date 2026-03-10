@@ -1,6 +1,6 @@
-use crate::textbufferext::{get_file_name, is_file, TextBufferExt2};
-use crate::textbuffermd::{TextBufferMd, NEWLINE};
-use crate::texttag::{CharFormat, ParFormat, Tag, TextTagExt2, COLORS};
+use crate::textbufferext::{TextBufferExt2, get_file_name, is_file};
+use crate::textbuffermd::{NEWLINE, TextBufferMd};
+use crate::texttag::{COLORS, CharFormat, ParFormat, Tag, TextTagExt2};
 use crate::texttagmanager::{TextEdit, TextTagManager};
 use crate::textviewext::TextViewExt2;
 use crate::{builder_get, connect, connect_fwd1};
@@ -8,13 +8,13 @@ use crate::{builder_get, connect, connect_fwd1};
 extern crate html_escape;
 
 use gdk::cairo;
+use gtk::EventControllerKey;
 use gtk::gio::File;
 use gtk::glib;
-use gtk::glib::signal::Inhibit;
+use gtk::glib::Propagation;
 use gtk::glib::Value;
 use gtk::prelude::*;
 use gtk::prelude::{Cast, ObjectExt};
-use gtk::EventControllerKey;
 
 use regex::Regex;
 use std::collections::HashMap;
@@ -23,11 +23,8 @@ use crate::gdk_glue::{ColorCreator, GetColor};
 use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
+use std::sync::mpsc;
 use std::thread;
-
-mod keys {
-    pub use gdk::keys::constants::*;
-}
 
 const MARGIN: i32 = 10;
 const TAB_WIDTH: i32 = 4;
@@ -55,7 +52,6 @@ fn get_image_store_dir() -> std::path::PathBuf {
 }
 
 fn blocking_get(url: &str) -> Result<reqwest::blocking::Response, reqwest::Error> {
-    // ToDo: this client should not be created every time!
     let custom = reqwest::redirect::Policy::custom(|attempt| attempt.follow());
     let client =
         reqwest::blocking::Client::builder().redirect(custom).user_agent("Wget/1.21.1").build()?;
@@ -63,24 +59,18 @@ fn blocking_get(url: &str) -> Result<reqwest::blocking::Response, reqwest::Error
 }
 
 fn fetch_title<F: Fn(&str) + 'static>(url: &str, and_then: F) {
-    // See: https://coaxion.net/blog/2019/02/mpsc-channel-api-for-painless-usage-of-threads-with-gtk-in-rust/
-    // Create a new sender/receiver pair with default priority
-    let (sender, receiver) = gtk::glib::MainContext::channel::<String>(glib::PRIORITY_DEFAULT);
-
-    // Spawn the thread and move the sender in there
+    let (sender, receiver) = mpsc::channel::<String>();
     let u = String::from(url);
     thread::spawn(move || {
         if let Ok(res) = blocking_get(u.as_str()) {
             if let Ok(text) = res.text() {
                 lazy_static! {
-                    // ToDo: this is most likely not helpful with the async setup
                     static ref RE: Regex = Regex::new(r"<title[^>]*>([^<]*)<").unwrap();
                 }
                 if let Some(caps) = RE.captures(&text) {
                     if let Some(c) = caps.get(1) {
                         let decoded =
                             String::from(html_escape::decode_html_entities(c.as_str().trim()));
-                        // Sending fails if the receiver is closed
                         let _ = sender.send(decoded);
                     }
                 }
@@ -88,11 +78,15 @@ fn fetch_title<F: Fn(&str) + 'static>(url: &str, and_then: F) {
         }
     });
 
-    // Attach the receiver to the default main context (None)
-    receiver.attach(None, move |msg| {
-        and_then(msg.as_str());
-        // Returning false here would close the receiver and have senders fail
-        gtk::glib::Continue(true)
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        match receiver.try_recv() {
+            Ok(msg) => {
+                and_then(msg.as_str());
+                glib::ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
     });
 }
 
@@ -202,7 +196,6 @@ struct SearchBar {
 }
 
 impl SearchBar {
-    // https://python-gtk-3-tutorial.readthedocs.io/en/latest/textview.html
     pub fn new<F: Fn() -> gtk::TextView + 'static>(b: &gtk::Builder, access_view_cb: F) -> Self {
         let this = Self {
             search_bar: builder_get!(b("search_bar")),
@@ -237,8 +230,10 @@ impl SearchBar {
     fn on_enabled(&self) {
         if !self.is_open() {
             self.clear_highlight();
-            self.search_bar.key_capture_widget().grab_focus();
-            self.search_bar.set_key_capture_widget::<gtk::Widget>(None);
+            if let Some(w) = self.search_bar.key_capture_widget() {
+                w.grab_focus();
+            }
+            self.search_bar.set_key_capture_widget(None::<&gtk::Widget>);
         }
     }
 
@@ -250,7 +245,6 @@ impl SearchBar {
         }
 
         let mut cursor = buffer.get_insert_iter();
-        // selection_bounds retrieves the iterators in order
         if let Some((start, end)) = buffer.selection_bounds() {
             if backward {
                 cursor = start;
@@ -293,7 +287,6 @@ impl SearchBar {
             return;
         }
 
-        // move view
         let cursor = buffer.get_insert_iter();
         let view: gtk::TextView = (self.access_view_cb)();
         if let Some((mut start, end)) =
@@ -308,7 +301,6 @@ impl SearchBar {
             view.scroll_to_iter(&mut start, 0.05, false, 0., 0.);
         }
 
-        // highlight all
         let mut iter = buffer.start_iter();
         while let Some((start, end)) =
             iter.forward_search(text.as_str(), gtk::TextSearchFlags::CASE_INSENSITIVE, None)
@@ -341,22 +333,23 @@ pub struct Colors {
 
 impl Colors {
     pub fn new() -> Self {
+        let black = gdk::RGBA::new(0.0, 0.0, 0.0, 1.0);
         Self {
-            outline_none: gdk::RGBA::black(),
-            outline_h1: gdk::RGBA::black(),
-            outline_h2: gdk::RGBA::black(),
-            outline_h3: gdk::RGBA::black(),
-            outline_h4: gdk::RGBA::black(),
-            outline_h5: gdk::RGBA::black(),
-            outline_h6: gdk::RGBA::black(),
+            outline_none: black,
+            outline_h1: black,
+            outline_h2: black,
+            outline_h3: black,
+            outline_h4: black,
+            outline_h5: black,
+            outline_h6: black,
         }
     }
 
     pub fn update(&mut self, style_context: &gtk::StyleContext, prefer_dark: bool) {
-        self.outline_none = GetColor::get_color(style_context, true, gtk::StateFlags::LINK)
-            .unwrap_or_else(gdk::RGBA::white);
-        self.outline_h1 = GetColor::get_color(style_context, true, gtk::StateFlags::SELECTED)
-            .unwrap_or_else(gdk::RGBA::blue);
+        self.outline_none = GetColor::get_color(style_context, false, gtk::StateFlags::empty())
+            .unwrap_or(gdk::RGBA::new(0.0, 0.0, 0.0, 1.0));
+        self.outline_h1 = GetColor::get_color(style_context, false, gtk::StateFlags::SELECTED)
+            .unwrap_or(gdk::RGBA::new(0.1, 0.4, 0.9, 1.0));
 
         let factor = if prefer_dark { -15. } else { 15. };
 
@@ -388,6 +381,7 @@ pub struct TextView {
     autosave_timer: Rc<RefCell<Option<glib::SourceId>>>,
     autosave_cb: Rc<RefCell<Option<Box<dyn Fn()>>>>,
 }
+
 #[derive(Clone)]
 pub enum AnchorKind {
     Image(String),
@@ -440,7 +434,6 @@ impl TextView {
         let link_start = buffer.create_mark(None, &buffer.start_iter(), true);
         let link_end = buffer.create_mark(None, &buffer.start_iter(), false);
 
-        // Autosave: debounced 2s after last keystroke
         let autosave_timer: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
         let autosave_cb: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
 
@@ -448,19 +441,17 @@ impl TextView {
             let timer = autosave_timer.clone();
             let cb = autosave_cb.clone();
             move |_| {
-                // Cancel any pending save
                 if let Some(id) = timer.borrow_mut().take() {
-                    glib::source_remove(id);
+                    id.remove();
                 }
-                // Restart the 2s countdown
                 let timer2 = timer.clone();
                 let cb2 = cb.clone();
-                let id: glib::SourceId = glib::timeout_add_seconds_local(2, move || {
+                let id = glib::timeout_add_seconds_local(2, move || {
                     timer2.borrow_mut().take();
                     if let Some(f) = cb2.borrow().as_ref() {
                         f();
                     }
-                    glib::Continue(false)
+                    glib::ControlFlow::Break
                 });
                 *timer.borrow_mut() = Some(id);
             }
@@ -486,11 +477,11 @@ impl TextView {
             autosave_cb,
         };
 
-        this.top_level.add_controller(&this.get_key_press_handler_background());
-        this.textview.add_controller(&this.get_key_press_handler());
-        this.textview.add_controller(&this.get_mouse_release_handler());
-        this.textview.add_controller(&this.get_drag_handler());
-        this.textview.add_controller(&this.get_drop_handler());
+        this.top_level.add_controller(this.get_key_press_handler_background());
+        this.textview.add_controller(this.get_key_press_handler());
+        this.textview.add_controller(this.get_mouse_release_handler());
+        this.textview.add_controller(this.get_drag_handler());
+        this.textview.add_controller(this.get_drop_handler());
         this.textview.set_buffer(Some(&this.buffer));
 
         this.textview.connect_query_tooltip({
@@ -503,14 +494,13 @@ impl TextView {
 
         this.link_edit.set_accept_link_cb(connect_fwd1!(this.accept_link()));
 
-        this.buffer
-            .connect_local("insert-text", true, connect_fwd1!(this.buffer_do_insert_text()))
-            .unwrap();
+        this.buffer.connect_local("insert-text", true, connect_fwd1!(this.buffer_do_insert_text()));
 
         this.buffer.connect_changed({
             let this2 = this.clone();
             move |_| {
                 this2.reapply_list_tags();
+                this2.textview.queue_draw();
             }
         });
 
@@ -522,9 +512,9 @@ impl TextView {
     fn create_checkbox_widget(&self, anchor: &gtk::TextChildAnchor, checked: bool) -> gtk::Widget {
         let checked_cell = Rc::new(RefCell::new(checked));
         let icon = gtk::Image::from_icon_name(if checked {
-            Some("checkbox-checked-symbolic")
+            "checkbox-checked-symbolic"
         } else {
-            Some("checkbox-symbolic")
+            "checkbox-symbolic"
         });
         icon.set_pixel_size(16);
         icon.set_valign(gtk::Align::Center);
@@ -542,7 +532,7 @@ impl TextView {
             move |g, _, _, _| {
                 let new_checked = !*checked_cell.borrow();
                 *checked_cell.borrow_mut() = new_checked;
-                icon.set_from_icon_name(if new_checked {
+                icon.set_icon_name(if new_checked {
                     Some("checkbox-checked-symbolic")
                 } else {
                     Some("checkbox-symbolic")
@@ -565,9 +555,10 @@ impl TextView {
                 g.set_state(gtk::EventSequenceState::Claimed);
             }
         });
-        icon.add_controller(&gesture);
+        icon.add_controller(gesture);
         icon.upcast::<gtk::Widget>()
     }
+
     fn try_auto_checkbox(&self) -> bool {
         if !self.is_editable() {
             return false;
@@ -589,7 +580,6 @@ impl TextView {
         let mut pos = buffer.get_insert_iter();
         let anchor = buffer.create_child_anchor(&mut pos);
 
-        // Tag the anchor char so to_markdown() can serialise it
         let tag = buffer.create_checkbox_tag(false);
         let anchor_start = buffer.iter_at_offset(pos.offset() - 1);
         buffer.apply_tag(&tag, &anchor_start, &pos);
@@ -603,7 +593,6 @@ impl TextView {
             last_offset: pos.offset(),
         });
 
-        // Insert a space after so the cursor is ready to type the label
         buffer.insert(&mut pos, " ");
         buffer.end_user_action();
         true
@@ -711,7 +700,6 @@ impl TextView {
                     break;
                 }
 
-                // Skip chars that are already live anchors
                 if iter.child_anchor().is_some() {
                     offset += 1;
                     continue;
@@ -735,7 +723,6 @@ impl TextView {
                     let mut pos = buffer.iter_at_offset(start.offset());
                     let anchor = buffer.create_child_anchor(&mut pos);
 
-                    // Re-apply the checkbox tag over the new anchor char
                     let new_tag = buffer.create_checkbox_tag(checked);
                     let anchor_start = buffer.iter_at_offset(pos.offset() - 1);
                     buffer.apply_tag(&new_tag, &anchor_start, &pos);
@@ -756,10 +743,6 @@ impl TextView {
                 }
             }
         }
-
-        // After undo/redo, live anchor widgets are destroyed but the \u{FFFC}
-        // placeholder chars remain. We match them to registry entries whose
-        // anchor.is_deleted() == true and recreate the widgets.
 
         let mut orphan_offsets: Vec<i32> = Vec::new();
         let mut iter = buffer.start_iter();
@@ -797,7 +780,6 @@ impl TextView {
             let mut ins = buffer.iter_at_offset(orphan_offset);
             let new_anchor = buffer.create_child_anchor(&mut ins);
 
-            // Recreate the correct widget based on what kind of anchor this was
             let widget = match &entry.kind {
                 AnchorKind::Image(path) => {
                     let store = self.image_widgets.borrow();
@@ -814,8 +796,6 @@ impl TextView {
                 }
                 AnchorKind::Rule => self.create_rule_widget(),
                 AnchorKind::Checkbox => {
-                    // Try to read checked state from the tag still on the orphan
-                    // char; if the tag is gone too, default to unchecked.
                     let checked = buffer
                         .get_checkbox_at_iter(&buffer.iter_at_offset(orphan_offset))
                         .map(|(c, _)| c)
@@ -826,7 +806,6 @@ impl TextView {
 
             self.textview.add_child_at_anchor(&widget, &new_anchor);
 
-            // Update the registry entry to point to the new live anchor
             let mut registry = self.anchor_registry.borrow_mut();
             if let Some(reg_entry) = registry.iter_mut().find(|e| {
                 e.anchor.is_deleted()
@@ -843,6 +822,7 @@ impl TextView {
             buffer.end_irreversible_action();
         }
     }
+
     fn try_auto_rule(&self) -> bool {
         if !self.is_editable() {
             return false;
@@ -963,7 +943,6 @@ impl TextView {
                 }
             } else if is_ol {
                 let dot_pos = item_text.find(". ").unwrap();
-                // instead of: item_text[..dot_pos].parse().unwrap_or(0)
                 let current_num: u64 = {
                     let char_count = item_text[..dot_pos].chars().count();
                     let num: String = item_text.chars().take(char_count).collect();
@@ -1056,6 +1035,7 @@ impl TextView {
             }
         }
     }
+
     fn try_auto_heading(&self) -> bool {
         if !self.is_editable() {
             return false;
@@ -1127,37 +1107,31 @@ impl TextView {
             return false;
         }
 
-        // save what we need before any mutation
         let current_line = cursor.line();
         let insert_text = if is_unordered { String::from("• ") } else { format!("{} ", prefix) };
 
         buffer.begin_user_action();
 
-        // delete the typed prefix
         let mut ls = buffer.iter_at_line(current_line).unwrap();
         let mut cur = buffer.get_insert_iter();
         buffer.delete(&mut ls, &mut cur);
 
-        // insert the new prefix
         let mut pos = buffer.get_insert_iter();
         let prefix_start_offset = pos.offset();
         buffer.insert(&mut pos, &insert_text);
 
-        // re-fetch everything fresh by line number / offset
         let line_iter = buffer.iter_at_line(current_line).unwrap();
         let mut line_end = line_iter.clone();
         if !line_end.ends_line() {
             line_end.forward_to_line_end();
         }
 
-        // margin tag on whole line
         let line_tag = buffer
             .tag_table()
             .lookup(if is_ordered { Tag::LIST_OL } else { Tag::LIST_UL })
             .unwrap();
         buffer.apply_tag(&line_tag, &line_iter, &line_end);
 
-        // grey color on prefix only - re-fetch fresh iterators by offset
         let prefix_start = buffer.iter_at_offset(prefix_start_offset);
         let prefix_end = buffer.get_insert_iter();
         let prefix_tag = buffer
@@ -1184,16 +1158,13 @@ impl TextView {
         let mut line_start = cursor.clone();
         line_start.set_line_offset(0);
 
-        // ── Checkbox continuation ─────────────────────────────────────────────
         if line_start.char() == '\u{FFFC}' {
             if let Some((_checked, _tag)) = buffer.get_checkbox_at_iter(&line_start) {
-                // content starts after the FFFC anchor char and the space
                 let mut content_start = line_start.clone();
                 content_start.forward_chars(2);
                 let content = buffer.text(&content_start, &cursor, false);
 
                 if content.trim().is_empty() {
-                    // empty checkbox line — delete the whole line and exit list
                     buffer.begin_user_action();
                     let mut ls = line_start.clone();
                     let mut cur = cursor.clone();
@@ -1201,7 +1172,6 @@ impl TextView {
                     buffer.end_user_action();
                     return true;
                 } else {
-                    // non-empty — insert a new unchecked checkbox on next line
                     buffer.begin_user_action();
                     let mut pos = cursor.clone();
                     buffer.insert(&mut pos, "\n");
@@ -1229,7 +1199,6 @@ impl TextView {
             }
         }
 
-        // ── existing ul/ol list continuation ─────────────────────────────────
         let line_text = buffer.text(&line_start, &cursor, false);
         let line = line_text.as_str();
 
@@ -1257,7 +1226,6 @@ impl TextView {
         };
 
         if let Some(prefix) = next_prefix {
-            // empty item = exit the list
             let prefix_char_len = prefix.trim_start().chars().count();
             let content: String = item_text.chars().skip(prefix_char_len).collect();
             if content.trim().is_empty() && !item_text.trim().is_empty() {
@@ -1314,6 +1282,7 @@ impl TextView {
 
         false
     }
+
     fn calculate_image_display_size(texture: &gdk::Texture, available_width: i32) -> (i32, i32) {
         let nat_w = texture.width();
         let nat_h = texture.height();
@@ -1337,7 +1306,7 @@ impl TextView {
         let path = get_image_store_dir().join(&filename);
         let path_str = path.to_string_lossy().to_string();
 
-        if texture.save_to_png(&path_str) {
+        if texture.save_to_png(&path_str).is_ok() {
             let available = self.textview.allocated_width();
             let (initial_w, initial_h) = Self::calculate_image_display_size(&texture, available);
 
@@ -1347,7 +1316,6 @@ impl TextView {
 
             let buffer = &self.buffer;
 
-            // Suppress list tag reapplication so the undo group stays clean
             *self.is_renumbering.borrow_mut() = true;
             buffer.begin_user_action();
 
@@ -1382,14 +1350,15 @@ impl TextView {
             *self.is_renumbering.borrow_mut() = false;
         }
     }
+
     fn create_resizable_image(
         &self,
         texture: &gdk::Texture,
-        path: &str,
+        _path: &str,
         initial_width: i32,
         initial_height: i32,
     ) -> gtk::Widget {
-        let picture = gtk::Picture::for_paintable(Some(texture));
+        let picture = gtk::Picture::for_paintable(texture);
         picture.set_size_request(initial_width, initial_height);
         picture.set_can_shrink(true);
         picture.set_keep_aspect_ratio(true);
@@ -1414,6 +1383,7 @@ impl TextView {
 
         container.upcast::<gtk::Widget>()
     }
+
     pub fn get_widget(&self) -> &gtk::Widget {
         &self.top_level
     }
@@ -1448,7 +1418,6 @@ impl TextView {
     }
 
     fn set_editable(&self, editable: bool) {
-        // ToDo: all formatting needs to be disabled, too
         *self.is_editable.borrow_mut() = editable;
         self.textview.set_editable(editable);
         if editable {
@@ -1517,14 +1486,14 @@ impl TextView {
         }
         false
     }
+
     fn paste_image(&self) -> bool {
-        // check internal clipboard first (for cut/copied images)
         let internal = self.internal_clipboard.borrow().clone();
         if let Some(kind) = internal {
             match kind {
                 AnchorKind::Image(path) => {
                     let store = self.image_widgets.borrow();
-                    if let Some((texture, w, h)) =
+                    if let Some((texture, _w, _h)) =
                         store.get(&path).map(|(t, w, h)| (t.clone(), *w, *h))
                     {
                         drop(store);
@@ -1552,13 +1521,10 @@ impl TextView {
                     buffer.end_user_action();
                     return true;
                 }
-                AnchorKind::Checkbox => {
-                    // do nothing here since checkboxes don't live in the clipboard
-                }
+                AnchorKind::Checkbox => {}
             }
         }
 
-        // fall back to clipboard texture
         let clipboard = self.textview.clipboard();
         let this = self.clone();
         clipboard.read_texture_async(None::<&gtk::gio::Cancellable>, move |result| {
@@ -1568,105 +1534,104 @@ impl TextView {
         });
         false
     }
+
     fn get_key_press_handler(&self) -> EventControllerKey {
         let controller = EventControllerKey::new();
         controller.connect_key_pressed({
             let this = self.clone();
             move |_controller: &EventControllerKey,
-                  key: gdk::keys::Key,
+                  key: gdk::Key,
                   _code: u32,
                   modifier: gdk::ModifierType| {
                 if modifier == gdk::ModifierType::CONTROL_MASK {
                     match key {
-                        keys::_0 => this.par_format(None),
-                        keys::_1 => this.par_format(Some(ParFormat::H1)),
-                        keys::_2 => this.par_format(Some(ParFormat::H2)),
-                        keys::_3 => this.par_format(Some(ParFormat::H3)),
-                        keys::_4 => this.par_format(Some(ParFormat::H4)),
-                        keys::_5 => this.par_format(Some(ParFormat::H5)),
-                        keys::_6 => this.par_format(Some(ParFormat::H6)),
-                        keys::b => this.char_format(CharFormat::Bold),
-                        keys::d => this.char_format(CharFormat::Strike),
-                        keys::i => this.char_format(CharFormat::Italic),
-                        keys::f => this.open_search(),
-                        keys::l => this.edit_link(),
-                        keys::n => this.apply_text_clear(),
-                        keys::t => this.char_format(CharFormat::Mono),
-                        keys::c => {
+                        gdk::Key::_0 => this.par_format(None),
+                        gdk::Key::_1 => this.par_format(Some(ParFormat::H1)),
+                        gdk::Key::_2 => this.par_format(Some(ParFormat::H2)),
+                        gdk::Key::_3 => this.par_format(Some(ParFormat::H3)),
+                        gdk::Key::_4 => this.par_format(Some(ParFormat::H4)),
+                        gdk::Key::_5 => this.par_format(Some(ParFormat::H5)),
+                        gdk::Key::_6 => this.par_format(Some(ParFormat::H6)),
+                        gdk::Key::b => this.char_format(CharFormat::Bold),
+                        gdk::Key::d => this.char_format(CharFormat::Strike),
+                        gdk::Key::i => this.char_format(CharFormat::Italic),
+                        gdk::Key::f => this.open_search(),
+                        gdk::Key::l => this.edit_link(),
+                        gdk::Key::n => this.apply_text_clear(),
+                        gdk::Key::t => this.char_format(CharFormat::Mono),
+                        gdk::Key::c => {
                             if !this.copy_anchor() {
-                                return Inhibit(false);
+                                return Propagation::Proceed;
                             }
                         }
-                        keys::x => {
+                        gdk::Key::x => {
                             if !this.cut_anchor() {
-                                return Inhibit(false);
+                                return Propagation::Proceed;
                             }
                         }
-                        keys::v => {
+                        gdk::Key::v => {
                             if this.paste_image() {
-                                return Inhibit(true);
+                                return Propagation::Stop;
                             }
-                            return Inhibit(false);
+                            return Propagation::Proceed;
                         }
-                        keys::y => this.redo(),
-                        keys::z => {
+                        gdk::Key::y => this.redo(),
+                        gdk::Key::z => {
                             if (modifier & gdk::ModifierType::SHIFT_MASK).is_empty() {
                                 this.undo();
                             } else {
                                 this.redo();
                             }
                         }
-                        keys::Down => this.text_move(false),
-                        keys::Up => this.text_move(true),
+                        gdk::Key::Down => this.text_move(false),
+                        gdk::Key::Up => this.text_move(true),
                         _ => {
-                            println!("Unmapped key {} mod {} code {}.", key, modifier, _code);
-                            return Inhibit(false);
+                            println!("Unmapped key {:?} mod {:?} code {}.", key, modifier, _code);
+                            return Propagation::Proceed;
                         }
                     }
-                    return Inhibit(true);
+                    return Propagation::Stop;
                 } else if modifier == gdk::ModifierType::SHIFT_MASK {
                     match key {
-                        keys::Tab | keys::ISO_Left_Tab => this.remove_tab(),
-                        _ => return Inhibit(false),
+                        gdk::Key::Tab | gdk::Key::ISO_Left_Tab => this.remove_tab(),
+                        _ => return Propagation::Proceed,
                     }
-                    return Inhibit(true);
+                    return Propagation::Stop;
                 }
                 if modifier.is_empty() {
                     match key {
-                        keys::F1 => this.char_format(CharFormat::Green),
-                        keys::F2 => this.char_format(CharFormat::Red),
-                        keys::F3 => this.char_format(CharFormat::Yellow),
-                        keys::F4 => this.char_format(CharFormat::Blue),
-                        keys::Tab | keys::ISO_Left_Tab => this.insert_tab(),
-                        keys::KP_Enter | keys::Return => {
+                        gdk::Key::F1 => this.char_format(CharFormat::Green),
+                        gdk::Key::F2 => this.char_format(CharFormat::Red),
+                        gdk::Key::F3 => this.char_format(CharFormat::Yellow),
+                        gdk::Key::F4 => this.char_format(CharFormat::Blue),
+                        gdk::Key::Tab | gdk::Key::ISO_Left_Tab => this.insert_tab(),
+                        gdk::Key::KP_Enter | gdk::Key::Return => {
                             if this.try_auto_rule() {
-                                return Inhibit(true);
+                                return Propagation::Stop;
                             }
-
                             if this.try_list_continue() {
-                                return Inhibit(true);
+                                return Propagation::Stop;
                             }
                             this.tags.text_edit(TextEdit::NewLine);
-                            return Inhibit(false);
+                            return Propagation::Proceed;
                         }
-                        keys::space => {
+                        gdk::Key::space => {
                             if this.try_auto_checkbox() {
-                                return Inhibit(true);
+                                return Propagation::Stop;
                             }
-
                             if this.try_auto_heading() {
-                                return Inhibit(true);
+                                return Propagation::Stop;
                             }
                             if this.try_auto_list() {
-                                return Inhibit(true);
+                                return Propagation::Stop;
                             }
-                            return Inhibit(false);
+                            return Propagation::Proceed;
                         }
-                        _ => return Inhibit(false),
+                        _ => return Propagation::Proceed,
                     }
-                    return Inhibit(true);
+                    return Propagation::Stop;
                 }
-                Inhibit(false)
+                Propagation::Proceed
             }
         });
         controller
@@ -1677,20 +1642,18 @@ impl TextView {
         controller.connect_key_pressed({
             let this = self.clone();
             move |_controller: &EventControllerKey,
-                  key: gdk::keys::Key,
+                  key: gdk::Key,
                   _code: u32,
                   _modifier: gdk::ModifierType| {
-                // just Enter/Return is swallowed by the entries, but this enables every modifier
-                // to make them work
                 match key {
-                    keys::Escape => {
+                    gdk::Key::Escape => {
                         this.link_edit.reject();
                         this.search_bar.hide();
                     }
-                    keys::KP_Enter | keys::Return => this.link_edit.accept(),
-                    _ => return Inhibit(false),
+                    gdk::Key::KP_Enter | gdk::Key::Return => this.link_edit.accept(),
+                    _ => return Propagation::Proceed,
                 }
-                Inhibit(true)
+                Propagation::Stop
             }
         });
         controller
@@ -1722,7 +1685,6 @@ impl TextView {
             let this = self.clone();
             move |drag_source: &gtk::DragSource, x, y| -> Option<gdk::ContentProvider> {
                 if let Some(link) = this.textview.get_link_at_location(x, y) {
-                    // a drag leaves a one char selection, this should be deleted
                     let cursor = this.buffer.get_insert_iter();
                     this.buffer.select_range(&cursor, &cursor);
                     let file = File::for_uri(&link);
@@ -1744,10 +1706,8 @@ impl TextView {
 
         handler.connect_accept({
             move |_target, drop| {
-                if let Some(f) = drop.formats() {
-                    return f.contain_mime_type(mime_moz) || f.contain_mime_type(mime_uri);
-                }
-                false
+                let formats = drop.formats();
+                formats.contain_mime_type(mime_moz) || formats.contain_mime_type(mime_uri)
             }
         });
 
@@ -1799,19 +1759,11 @@ impl TextView {
         let mut start = self.buffer.get_insert_iter();
         start.set_line(start.line());
         let mut end = start.clone();
-        // ToDo: this might be a problem for empty lines
         end.forward_to_line_end();
 
         self.buffer.apply_paragraph_format(format, &start, &end);
     }
 
-    // Changing the format of the current selection/the current word/the cursor
-    // Decide if the format is applied or cleared:
-    // * for a selection the first character shall decide
-    // * for a word the format at the cursor shall decide
-    // * for the cursor, the tag manager knows the current format
-    // The MONO format is used as long as the selection doesn't consist of complete lines
-    // ToDo: The implementation is far from complete
     pub fn char_format(&self, format: CharFormat) {
         if !self.is_editable() {
             return;
@@ -1821,7 +1773,6 @@ impl TextView {
         let b = &self.buffer;
 
         let toggle_tag = |start: &gtk::TextIter, end: &gtk::TextIter| {
-            // ToDo: handle multiline formatting
             let tag = b.tag_table().lookup(tag_str).unwrap();
             b.begin_user_action();
             if start.has_tag(&tag) {
@@ -1839,8 +1790,6 @@ impl TextView {
             b.end_user_action();
         };
 
-        // links should be formatted completely
-        // ToDo: a possible selection should be considered
         let start = self.buffer.get_insert_iter();
         if let Some((_, tag)) = self.buffer.get_link_at_iter(&start) {
             if let Some((start, end)) = self.buffer.get_current_tag_bounds(&tag) {
@@ -1875,7 +1824,6 @@ impl TextView {
             return;
         }
         let clear = |start: &gtk::TextIter, end: &gtk::TextIter| {
-            // Remove overlapping paragraph tags on the whole paragraph
             for line in start.line()..end.line() + 1 {
                 if let Some(line_iter) = self.buffer.iter_at_line(line) {
                     for tag in line_iter.tags() {
@@ -1956,7 +1904,6 @@ impl TextView {
             start = s;
             end = e;
         } else {
-            // select current non-whitespace clock, to capture complete links
             while start.backward_char() {
                 if start.char().is_whitespace() {
                     start.forward_char();
@@ -2006,6 +1953,7 @@ impl TextView {
         self.buffer.redo();
         self.restore_anchors();
     }
+
     pub fn to_markdown(&self) -> String {
         self.buffer.to_markdown()
     }
@@ -2029,7 +1977,17 @@ impl TextView {
         self.buffer.end_irreversible_action();
         self.buffer.place_cursor(&self.buffer.start_iter());
         self.restore_anchors();
+
+        let textview = self.textview.clone();
+        let buffer = self.buffer.clone();
+        glib::idle_add_local(move || {
+            if let Some(mut iter) = buffer.iter_at_line(0) {
+                textview.scroll_to_iter(&mut iter, 0.0, true, 0.0, 0.0);
+            }
+            glib::ControlFlow::Break
+        });
     }
+
     fn insert_tab(&self) {
         if !self.is_editable() {
             return;
@@ -2048,7 +2006,6 @@ impl TextView {
             cursor.set_line(cursor.line());
         }
         for _ in 0..TAB_WIDTH {
-            // ToDo: maybe other whitespace types should be considered
             if cursor.char() == ' ' {
                 let mut end = cursor.clone();
                 end.forward_char();
@@ -2077,7 +2034,6 @@ impl TextView {
 
         let mut line_iter = self.buffer.start_iter();
         let mut line = 0;
-        // let start = Instant::now();
         loop {
             for tag in &line_iter.toggled_tags(true) {
                 if let Some(par_format) = &tag.get_par_format() {
@@ -2121,10 +2077,6 @@ impl TextView {
                 break;
             }
         }
-
-        // let end = Instant::now();
-        // let dur = end.duration_since(start);
-        // println!("Elapsed: {}µs", dur.as_micros());
 
         model
     }

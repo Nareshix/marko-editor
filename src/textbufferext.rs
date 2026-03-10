@@ -31,13 +31,11 @@ pub trait TextBufferExt2 {
     fn create_checkbox_tag(&self, checked: bool) -> gtk::TextTag;
     fn get_checkbox_at_iter(&self, iter: &gtk::TextIter) -> Option<(bool, gtk::TextTag)>;
 
-    // Current word for cursor at start or in word, NOT at the end.
     fn get_current_word_bounds(&self) -> Option<(TextIter, TextIter)>;
     fn get_current_tag_bounds(&self, tag: &gtk::TextTag) -> Option<(TextIter, TextIter)>;
 
     fn get_insert_iter(&self) -> TextIter;
 
-    // ToDo: duplicated code for image and link
     fn create_image_tag(&self, link: &str) -> gtk::TextTag;
     fn get_image_at_iter(&self, iter: &gtk::TextIter) -> Option<(String, gtk::TextTag)>;
 
@@ -114,7 +112,6 @@ impl TextBufferExt2 for gtk::TextBuffer {
                 return Some((image, tag));
             }
         }
-        // the link should also be found with the cursor at the end of the tag
         let tags = iter.toggled_tags(false);
         for tag in tags {
             if let Some(image) = tag.get_image() {
@@ -140,13 +137,11 @@ impl TextBufferExt2 for gtk::TextBuffer {
         let name = format!("{}{}", LINK_START, link);
         let is_file = is_file(link);
         let table = &self.tag_table();
-        // ToDo: this lookup might be slow
         if let Some(tag) = table.lookup(&name) {
             tag
         } else {
-            static BLUE: gdk::RGBA = gdk::RGBA { red: 0f32, green: 0f32, blue: 1f32, alpha: 1f32 };
-            static ORANGE: gdk::RGBA =
-                gdk::RGBA { red: 0.9f32, green: 0.5f32, blue: 0f32, alpha: 1f32 };
+            static BLUE: gdk::RGBA = gdk::RGBA::new(0f32, 0f32, 1f32, 1f32);
+            static ORANGE: gdk::RGBA = gdk::RGBA::new(0.9f32, 0.5f32, 0f32, 1f32);
             let link_tag = TextTagTable::create_tag(&name, table);
             link_tag.set_underline(gtk::pango::Underline::Single);
             link_tag.set_foreground_rgba(Some(if is_file { &ORANGE } else { &BLUE }));
@@ -161,7 +156,6 @@ impl TextBufferExt2 for gtk::TextBuffer {
                 return Some((link, tag));
             }
         }
-        // the link should also be found with the cursor at the end of the tag
         let tags = iter.toggled_tags(false);
         for tag in tags {
             if let Some(link) = tag.get_link() {
@@ -196,8 +190,6 @@ impl TextBufferExt2 for gtk::TextBuffer {
         mark
     }
 
-    // Moves complete lines up and down. An optional selection is extendend to the complete lines.
-    // ToDo: A selection with an empty line at the end gets stripped of it at the end of the buffer.
     fn text_move(&self, up: bool) {
         let mut start = self.get_insert_iter();
         let mut end = start.clone();
@@ -220,12 +212,11 @@ impl TextBufferExt2 for gtk::TextBuffer {
             return;
         }
 
-        start.set_line(line_start); // move start to line beginning
-        let add_ending_nl = line_end == self.line_count() - 1; // only when moving up!
-        let mut add_beginning_nl = false; // only when moving down!
+        start.set_line(line_start);
+        let add_ending_nl = line_end == self.line_count() - 1;
+        let mut add_beginning_nl = false;
         end.forward_line();
 
-        // calculate where to insert the content (move target)
         let mut insert = start.clone();
         if up {
             insert.backward_line();
@@ -242,7 +233,6 @@ impl TextBufferExt2 for gtk::TextBuffer {
         }
         let mark_insert = self.get_new_mark_at(None, true, &insert);
 
-        // copy the content to another buffer
         let other = gtk::TextBuffer::new(Some(&self.tag_table()));
         let mut end_for_copy = end.clone();
         if add_beginning_nl {
@@ -255,7 +245,6 @@ impl TextBufferExt2 for gtk::TextBuffer {
             start.backward_char();
         }
 
-        // buffer modification, delete old content and insert at new position
         self.begin_user_action();
         self.delete(&mut start, &mut end);
         self.insert_range(
@@ -265,7 +254,6 @@ impl TextBufferExt2 for gtk::TextBuffer {
         );
         self.end_user_action();
 
-        // move the cursor to the expected location and restore equivalent selection
         let mut cursor = self.iter_at_mark(&mark_insert);
         if add_beginning_nl {
             cursor.forward_line();
@@ -278,6 +266,7 @@ impl TextBufferExt2 for gtk::TextBuffer {
             self.place_cursor(&cursor);
         }
     }
+
     fn create_checkbox_tag(&self, checked: bool) -> gtk::TextTag {
         let name =
             format!("{}{}", crate::texttag::Tag::CHECKBOX_START, if checked { "1" } else { "0" });

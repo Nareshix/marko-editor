@@ -30,7 +30,6 @@ impl App {
 
     fn open(app: &gtk::Application, files: &[gtk::gio::File], _hint: &str) {
         let window = App::create_window(app);
-        // ToDo: handle multiple files
         window.enqueue_file(files[0].path().unwrap());
         window.prepare_show();
         window.show();
@@ -43,6 +42,7 @@ impl App {
     }
 
     pub fn run(&self, argv: &[String]) -> i32 {
-        self.app.run_with_args(argv)
+        let code = self.app.run_with_args(argv);
+        code.into()
     }
 }

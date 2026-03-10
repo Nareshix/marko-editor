@@ -1,11 +1,3 @@
-/*
- * Gtk interfaces with &gtk::TextTag. The name is used as id.
- * Pango markup uses its font description as name for the tags,
- * For editing the currently active tags need to be maintained.
- * It is not clear if gtk::TextTag is used as value type, since the API often represents it without
-   & but on the other hand the docs say, that it should be in the tag table.
-*/
-
 use crate::texttag::Tag;
 use gtk::prelude::TextTagExt;
 
@@ -86,12 +78,12 @@ impl TextTagTable {
 
         let tag_mono = TextTagTable::create_tag(Tag::MONO, &table);
         tag_mono.set_family(Some("Monospace"));
-        let grey = gdk::RGBA { red: 0f32, green: 0f32, blue: 0.3f32, alpha: 0.05f32 };
+        let grey = gdk::RGBA::new(0f32, 0f32, 0.3f32, 0.05f32);
         tag_mono.set_background_rgba(Some(&grey));
 
         let tag_code = TextTagTable::create_tag(Tag::CODE, &table);
         tag_code.set_family(Some("Monospace"));
-        let code_bg = gdk::RGBA { red: 0.2f32, green: 0.2f32, blue: 0.2f32, alpha: 1.0f32 };
+        let code_bg = gdk::RGBA::new(0.2f32, 0.2f32, 0.2f32, 1.0f32);
         tag_code.set_paragraph_background_rgba(Some(&code_bg));
         tag_code.set_left_margin(30);
         tag_code.set_right_margin(30);
@@ -101,27 +93,27 @@ impl TextTagTable {
         tag_strike.set_strikethrough(true);
 
         let tag_red = TextTagTable::create_tag(Tag::RED, &table);
-        let red = gdk::RGBA { red: 1f32, green: 0f32, blue: 0f32, alpha: 0.4f32 };
+        let red = gdk::RGBA::new(1f32, 0f32, 0f32, 0.4f32);
         tag_red.set_background_rgba(Some(&red));
 
         let tag_green = TextTagTable::create_tag(Tag::GREEN, &table);
-        let green = gdk::RGBA { red: 0f32, green: 1f32, blue: 0f32, alpha: 0.4f32 };
+        let green = gdk::RGBA::new(0f32, 1f32, 0f32, 0.4f32);
         tag_green.set_background_rgba(Some(&green));
 
         let tag_blue = TextTagTable::create_tag(Tag::BLUE, &table);
-        let blue = gdk::RGBA { red: 0f32, green: 0.5f32, blue: 1f32, alpha: 0.6f32 };
+        let blue = gdk::RGBA::new(0f32, 0.5f32, 1f32, 0.6f32);
         tag_blue.set_background_rgba(Some(&blue));
 
         let tag_yellow = TextTagTable::create_tag(Tag::YELLOW, &table);
-        let yellow = gdk::RGBA { red: 1f32, green: 1f32, blue: 0f32, alpha: 0.6f32 };
+        let yellow = gdk::RGBA::new(1f32, 1f32, 0f32, 0.6f32);
         tag_yellow.set_background_rgba(Some(&yellow));
 
         let tag_search = TextTagTable::create_tag(Tag::SEARCH, &table);
-        let highlight = gdk::RGBA { red: 1f32, green: 0f32, blue: 1f32, alpha: 0.4f32 };
+        let highlight = gdk::RGBA::new(1f32, 0f32, 1f32, 0.4f32);
         tag_search.set_background_rgba(Some(&highlight));
 
         let _tag_rule = TextTagTable::create_tag(Tag::RULE, &table);
-        // margin tag - applied to whole line
+
         let tag_list_ul = TextTagTable::create_tag(Tag::LIST_UL, &table);
         tag_list_ul.set_left_margin(32);
         tag_list_ul.set_weight(gtk::pango::ffi::PANGO_WEIGHT_BOLD);
@@ -130,9 +122,8 @@ impl TextTagTable {
         tag_list_ol.set_left_margin(32);
         tag_list_ol.set_weight(gtk::pango::ffi::PANGO_WEIGHT_BOLD);
 
-        // color tag - applied to prefix chars only
         let tag_list_ul_prefix = TextTagTable::create_tag(Tag::LIST_UL_PREFIX, &table);
-        let muted = gdk::RGBA { red: 0.5f32, green: 0.5f32, blue: 0.5f32, alpha: 1.0f32 };
+        let muted = gdk::RGBA::new(0.5f32, 0.5f32, 0.5f32, 1.0f32);
         tag_list_ul_prefix.set_foreground_rgba(Some(&muted));
 
         let tag_list_ol_prefix = TextTagTable::create_tag(Tag::LIST_OL_PREFIX, &table);

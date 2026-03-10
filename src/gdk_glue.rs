@@ -11,21 +11,21 @@ impl Serialize<gdk::Rectangle> for gdk::Rectangle {
         if a.next()?.ne("rect") {
             return None;
         }
-        Some(Self {
-            x: a.next()?.parse::<i32>().ok()?,
-            y: a.next()?.parse::<i32>().ok()?,
-            width: a.next()?.parse::<i32>().ok()?,
-            height: a.next()?.parse::<i32>().ok()?,
-        })
+        Some(gdk::Rectangle::new(
+            a.next()?.parse::<i32>().ok()?,
+            a.next()?.parse::<i32>().ok()?,
+            a.next()?.parse::<i32>().ok()?,
+            a.next()?.parse::<i32>().ok()?,
+        ))
     }
 
     fn serialize(&self) -> String {
         format!(
             "rect_{}_{}_{}_{}",
-            self.x.to_string(),
-            self.y.to_string(),
-            self.width.to_string(),
-            self.height.to_string()
+            self.x().to_string(),
+            self.y().to_string(),
+            self.width().to_string(),
+            self.height().to_string()
         )
     }
 }
@@ -36,34 +36,60 @@ pub trait GetColor {
 
 impl GetColor for gtk::StyleContext {
     fn get_color(&self, is_background: bool, flags: gtk::StateFlags) -> Option<gdk::RGBA> {
-        let ctx = self.clone();
-        ctx.set_state(flags);
-        let mut s = gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, 2, 2).unwrap();
-        let c = gtk::cairo::Context::new(&s).ok()?;
         if is_background {
-            gtk::render_background(&ctx, &c, 0f64, 0f64, 1f64, 1f64);
+            None
         } else {
-            gtk::render_line(&ctx, &c, 0f64, 0f64, 1f64, 1f64);
+            let saved = self.state();
+            self.set_state(flags);
+            let color = self.color();
+            self.set_state(saved);
+            Some(color)
         }
-        drop(c);
+    }
+}
 
-        let data = s.data().unwrap();
-        let slice = &data[0..4];
+fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g.max(b));
+    let min = r.min(g.min(b));
+    let delta = max - min;
 
-        let transform = |input: f32| -> f32 {
-            if slice[3] == 0 {
-                0.
-            } else {
-                (input / (slice[3] as f32) * 255f32).floor() / 255f32
-            }
-        };
+    let v = max;
+    let s = if max == 0.0 { 0.0 } else { delta / max };
 
-        Some(gdk::RGBA {
-            red: transform(slice[2] as f32),
-            green: transform(slice[1] as f32),
-            blue: transform(slice[0] as f32),
-            alpha: 1f32,
-        })
+    let h = if delta == 0.0 {
+        0.0
+    } else if max == r {
+        let mut h = (g - b) / delta;
+        if h < 0.0 {
+            h += 6.0;
+        }
+        h / 6.0
+    } else if max == g {
+        ((b - r) / delta + 2.0) / 6.0
+    } else {
+        ((r - g) / delta + 4.0) / 6.0
+    };
+
+    (h, s, v)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    if s == 0.0 {
+        return (v, v, v);
+    }
+    let h6 = h * 6.0;
+    let i = h6.floor() as i32;
+    let f = h6 - i as f32;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+    match i % 6 {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
     }
 }
 
@@ -73,7 +99,7 @@ pub trait ColorCreator {
 
 impl ColorCreator for gdk::RGBA {
     fn brighter(&self, factor: f32) -> gdk::RGBA {
-        let (h, mut s, mut v) = gtk::rgb_to_hsv(self.red, self.green, self.blue);
+        let (h, mut s, mut v) = rgb_to_hsv(self.red(), self.green(), self.blue());
         v *= factor / 100f32;
         if v > 1f32 {
             s -= v - 1f32;
@@ -83,7 +109,7 @@ impl ColorCreator for gdk::RGBA {
             v = 1f32;
         }
 
-        let (red, green, blue) = gtk::hsv_to_rgb(h, s, v);
-        gdk::RGBA { red, green, blue, alpha: self.alpha }
+        let (red, green, blue) = hsv_to_rgb(h, s, v);
+        gdk::RGBA::new(red, green, blue, self.alpha())
     }
 }

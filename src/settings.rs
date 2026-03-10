@@ -10,7 +10,7 @@ use crate::gdk_x11_glue::WindowGeometry;
 
 use crate::res::APP_NAME;
 use gtk::glib;
-use gtk::glib::IsA;
+use gtk::prelude::IsA;
 use std::cell::{Ref, RefCell};
 use std::fs;
 use std::path::PathBuf;

@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: brew install gtk4
-      - run: cargo build --release
+      - run: cargo build --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
           name: marko-mac
@@ -39,7 +39,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gtk4
             mingw-w64-ucrt-x86_64-rust
       - shell: msys2 {0}
-        run: cargo build --release
+        run: cargo build --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
           name: marko-windows

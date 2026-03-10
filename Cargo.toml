@@ -22,15 +22,14 @@ dirs = "6.0.0"
 chrono = "0.4.44"
 
 [dependencies.gtk]
-version = "0.*"
+version = "0.11"
 package = "gtk4"
 
 [dependencies.gdk]
-version = "0.*"
+version = "0.11"
 package = "gdk4"
 
 [dependencies.gdk4-x11]
-version = "0.*"
+version = "0.11"
 package = "gdk4-x11"
 optional = true
-

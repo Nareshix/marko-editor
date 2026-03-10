@@ -44,6 +44,7 @@ jobs:
             mingw-w64-ucrt-x86_64-gtk4
             mingw-w64-ucrt-x86_64-rust
             mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-vulkan-loader
 
       - shell: msys2 {0}
         run: cargo build --release --no-default-features
@@ -58,6 +59,8 @@ jobs:
             | awk '{print $3}' \
             | xargs -I{} cp {} release-win/
 
+          cp /ucrt64/bin/vulkan-1.dll release-win/ || true
+
           mkdir -p release-win/share
           cp -r /ucrt64/share/glib-2.0      release-win/share/
           cp -r /ucrt64/share/icons         release-win/share/
@@ -66,6 +69,8 @@ jobs:
           mkdir -p release-win/share/glib-2.0/schemas
           cp /ucrt64/share/glib-2.0/schemas/*.xml release-win/share/glib-2.0/schemas/ || true
           glib-compile-schemas release-win/share/glib-2.0/schemas/
+
+          printf '@echo off\r\nset GSK_RENDERER=ngl\r\nstart "" "%%~dp0Polora.exe"\r\n' > release-win/Polora-launch.bat
 
       - shell: pwsh
         run: Compress-Archive -Path release-win\* -DestinationPath Polora-windows.zip

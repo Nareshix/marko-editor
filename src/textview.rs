@@ -555,9 +555,8 @@ impl TextView {
                 let loaded = texture_opt.or_else(|| {
                     let file = gtk::gio::File::for_path(&path);
                     let tex = gdk::Texture::from_file(&file).ok()?;
-                    let aspect = tex.height() as f64 / tex.width() as f64;
-                    let w = 1000i32;
-                    let h = (w as f64 * aspect) as i32;
+                    let available = self.textview.allocated_width();
+                    let (w, h) = Self::calculate_image_display_size(&tex, available);
                     self.image_widgets.borrow_mut().insert(path.clone(), (tex.clone(), w, h));
                     Some((tex, w, h))
                 });
@@ -1112,6 +1111,21 @@ impl TextView {
 
         false
     }
+    
+    fn calculate_image_display_size(texture: &gdk::Texture, available_width: i32) -> (i32, i32) {
+        let nat_w = texture.width();
+        let nat_h = texture.height();
+        let max_w = (available_width - (MARGIN * 2) - 24).max(100);
+
+        if nat_w <= max_w {
+            (nat_w, nat_h)
+        } else {
+            let aspect = nat_h as f64 / nat_w as f64;
+            let w = max_w;
+            let h = (w as f64 * aspect).round() as i32;
+            (w, h.max(1))
+        }
+    }
 
     fn save_and_insert_image(&self, texture: gdk::Texture) {
         let filename = format!(
@@ -1122,19 +1136,20 @@ impl TextView {
         let path_str = path.to_string_lossy().to_string();
 
         if texture.save_to_png(&path_str) {
-            let aspect = texture.height() as f64 / texture.width() as f64;
-            let initial_w = 1000i32;
-            let initial_h = (initial_w as f64 * aspect) as i32;
+            let available = self.textview.allocated_width();
+            let (initial_w, initial_h) = Self::calculate_image_display_size(&texture, available);
 
             self.image_widgets
                 .borrow_mut()
                 .insert(path_str.clone(), (texture.clone(), initial_w, initial_h));
 
             let buffer = &self.buffer;
+
+            // Suppress list tag reapplication so the undo group stays clean
+            *self.is_renumbering.borrow_mut() = true;
             buffer.begin_user_action();
 
             let mut cursor = buffer.get_insert_iter();
-
             if !cursor.starts_line() {
                 buffer.insert(&mut cursor, "\n");
             }
@@ -1162,6 +1177,7 @@ impl TextView {
             buffer.place_cursor(&cursor);
 
             buffer.end_user_action();
+            *self.is_renumbering.borrow_mut() = false;
         }
     }
     fn create_resizable_image(

@@ -1,6 +1,13 @@
 # Polora
 
-Marko Editor is a simple WYSIWYG editor for note taking written in Rust and GTK 4. It uses Markdown as storage format and can read simple Markdown files. However, the main focus of Marko Editor is WYSIWYG note taking and not being a 100% compliant Markdown editor.
+Polora is a simple WYSIWYG editor for note taking written in Rust and GTK 4. It uses Markdown as storage format and can read simple Markdown files. However, the main focus of Marko Editor is WYSIWYG note taking and not being a 100% compliant Markdown editor.
+
+```
+curl -L https://github.com/Nareshix/Polora/releases/latest/download/Polora-linux \
+  -o ~/.local/bin/polora && chmod +x ~/.local/bin/polora
+```
+
+---
 
 ![Marko Editor in link edit mode screenshot](./doc/marko-editor-screenshot.png?raw=true "Marko Editor in link edit mode")
 

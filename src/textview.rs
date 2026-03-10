@@ -862,12 +862,12 @@ impl TextView {
         let path_str = path.to_string_lossy().to_string();
 
         if texture.save_to_png(&path_str) {
-            let max_w = 600i32;
+            let view_w = self.textview.allocated_width() - (MARGIN * 2);
             let natural_w = texture.width();
             let natural_h = texture.height();
-            let (initial_w, initial_h) = if natural_w > max_w {
-                let scale = max_w as f64 / natural_w as f64;
-                (max_w, (natural_h as f64 * scale) as i32)
+            let (initial_w, initial_h) = if natural_w > view_w {
+                let scale = view_w as f64 / natural_w as f64;
+                (view_w, (natural_h as f64 * scale) as i32)
             } else {
                 (natural_w, natural_h)
             };

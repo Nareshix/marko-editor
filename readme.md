@@ -2,9 +2,18 @@
 
 Polora is a simple WYSIWYG editor for note taking written in Rust and GTK 4. It uses Markdown as storage format and can read simple Markdown files. However, the main focus of Marko Editor is WYSIWYG note taking and not being a 100% compliant Markdown editor.
 
+Some notes
+
+For linux its a binary. windows unzip and press on the exe. mac idk yet. still in alpha. got bugs and is unstable.
+some improvements to add later
+- better undo and redo system
+- fix the text glitch in list items. Doesnt always happen but not uncommon as well
+- rest is do as i use it
+
+
 
 ---
-
+# Prev owner notes
 ![Marko Editor in link edit mode screenshot](./doc/marko-editor-screenshot.png?raw=true "Marko Editor in link edit mode")
 
 ## Background

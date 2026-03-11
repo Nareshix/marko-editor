@@ -28,10 +28,16 @@ textview {
     font-size: 12pt;
 }
 menubutton {
-  font-weight: bold;
+    font-weight: bold;
+}
+#lbl_current_file {
+    border-radius: 4px;
+    padding: 1px 4px;
+}
+#lbl_current_file:hover {
+    background-color: alpha(currentColor, 0.08);
 }
 "#;
-
 fn build_file_tree_model(root: &Path) -> gtk::TreeStore {
     let store = gtk::TreeStore::new(&[
         glib::GString::static_type(),
@@ -135,6 +141,7 @@ struct Ui {
     file_tree_view: gtk::TreeView,
     lbl_folder_name: gtk::Label,
     btn_open_folder: gtk::Button,
+    lbl_current_file: gtk::Label,
 }
 
 #[derive(Clone)]
@@ -145,6 +152,8 @@ pub struct MainWindow {
     css: gtk::CssProvider,
     file: Rc<RefCell<Option<PathBuf>>>,
     open_folder: Rc<RefCell<Option<PathBuf>>>,
+    /// Holds the path of the file/dir last right-clicked in the file tree.
+    context_menu_target: Rc<RefCell<Option<PathBuf>>>,
 }
 
 impl MainWindow {
@@ -178,6 +187,7 @@ impl MainWindow {
             file_tree_view: builder_get!(b("file_tree_view")),
             lbl_folder_name: builder_get!(b("lbl_folder_name")),
             btn_open_folder: builder_get!(b("btn_open_folder")),
+            lbl_current_file: builder_get!(b("lbl_current_file")),
         });
         ui.text_view_container.append(ui.text_view.get_widget());
 
@@ -190,6 +200,7 @@ impl MainWindow {
             css,
             file: Rc::new(RefCell::new(None)),
             open_folder: Rc::new(RefCell::new(None)),
+            context_menu_target: Rc::new(RefCell::new(None)),
         };
 
         this.ui.text_view.set_activate_link_cb({
@@ -221,6 +232,7 @@ impl MainWindow {
 
         this.ui.btn_open_folder.connect_clicked(connect!(this.btn_open_folder_clicked()));
 
+        // Left-click: open file
         this.ui.file_tree_view.connect_row_activated({
             let s = this.clone();
             move |tree, path, _col| {
@@ -234,6 +246,20 @@ impl MainWindow {
                 }
             }
         });
+
+        // Right-click: context menu (New / Rename / Delete)
+        {
+            let right_click = gtk::GestureClick::new();
+            right_click.set_button(3);
+            right_click.connect_pressed({
+                let s = this.clone();
+                move |gesture, _n, x, y| {
+                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                    s.show_file_tree_context_menu(x, y);
+                }
+            });
+            this.ui.file_tree_view.add_controller(right_click);
+        }
 
         this.ui.outline_maxlevel.connect_changed(connect!(this.update_outline()));
         this.ui.outline_view.connect_row_activated({
@@ -285,6 +311,278 @@ impl MainWindow {
 
         this
     }
+
+
+fn show_file_tree_context_menu(&self, x: f64, y: f64) {
+    let tree = &self.ui.file_tree_view;
+
+    let clicked_path: Option<PathBuf> = tree
+        .path_at_pos(x as i32, y as i32)
+        .and_then(|(tp, _, _, _)| tp)
+        .and_then(|tp| {
+            tree.model().and_then(|m| {
+                m.iter(&tp).map(|iter| {
+                    PathBuf::from(m.get_value(&iter, 1).get::<String>().unwrap_or_default())
+                })
+            })
+        });
+
+    *self.context_menu_target.borrow_mut() = clicked_path.clone();
+
+    // Always register fresh actions
+    for id in &["ft_new_file", "ft_rename", "ft_delete"] {
+        if self.ui.window.has_action(id) {
+            self.ui.window.remove_action(id);
+        }
+    }
+    self.setup_action("ft_new_file", connect_action_plain!(self.ft_new_file()));
+    self.setup_action("ft_rename",   connect_action_plain!(self.ft_rename()));
+    self.setup_action("ft_delete",   connect_action_plain!(self.ft_delete()));
+
+    // Always build the same 3-item menu — just disable items when nothing is clicked
+    let menu = gtk::gio::Menu::new();
+    menu.append(Some("New File Here"), Some("win.ft_new_file"));
+    menu.append(Some("Rename"),        Some("win.ft_rename"));
+    menu.append(Some("Delete"),        Some("win.ft_delete"));
+
+    // Enable/disable based on whether a file/dir was clicked
+    let has_target = clicked_path.is_some();
+    if let Some(action) = self.ui.window.lookup_action("ft_rename") {
+        action.downcast::<gtk::gio::SimpleAction>().unwrap().set_enabled(has_target);
+    }
+    if let Some(action) = self.ui.window.lookup_action("ft_delete") {
+        action.downcast::<gtk::gio::SimpleAction>().unwrap().set_enabled(has_target);
+    }
+
+    let popover = gtk::PopoverMenu::from_model(Some(&menu));
+    popover.set_parent(tree);
+    popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    popover.set_has_arrow(false);
+    popover.popup();
+}
+    fn ft_new_file(&self) {
+        let base_dir: PathBuf = {
+            let target = self.context_menu_target.borrow().clone();
+            match target {
+                Some(p) if p.is_dir() => p,
+                Some(p) => p.parent().map(|d| d.to_path_buf()).unwrap_or_else(|| {
+                    self.open_folder.borrow().clone().unwrap_or_else(|| PathBuf::from("."))
+                }),
+                None => self.open_folder.borrow().clone().unwrap_or_else(|| PathBuf::from(".")),
+            }
+        };
+
+        let dlg = gtk::Dialog::new();
+        dlg.set_title(Some("New File"));
+        dlg.set_transient_for(Some(&self.ui.window));
+        dlg.set_modal(true);
+
+        let vbox = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        vbox.set_margin_top(12);
+        vbox.set_margin_bottom(12);
+        vbox.set_margin_start(12);
+        vbox.set_margin_end(12);
+
+        let lbl = gtk::Label::new(Some("File name (`.md` added automatically if no extension):"));
+        lbl.set_halign(gtk::Align::Start);
+        let entry = gtk::Entry::new();
+        entry.set_placeholder_text(Some("my-note.md"));
+        entry.set_activates_default(true);
+
+        vbox.append(&lbl);
+        vbox.append(&entry);
+        dlg.content_area().append(&vbox);
+
+        dlg.add_button("Cancel", gtk::ResponseType::Cancel);
+        let btn_ok = dlg.add_button("Create", gtk::ResponseType::Ok);
+        btn_ok.add_css_class("suggested-action");
+        dlg.set_default_response(gtk::ResponseType::Ok);
+
+        dlg.connect_response({
+            let s = self.clone();
+            let entry = entry.clone();
+            move |dlg, resp| {
+                dlg.close();
+                if resp != gtk::ResponseType::Ok {
+                    return;
+                }
+                let mut name = entry.text().to_string().trim().to_string();
+                if name.is_empty() {
+                    return;
+                }
+                if !name.contains('.') {
+                    name.push_str(".md");
+                }
+                let new_path = base_dir.join(&name);
+                if new_path.exists() {
+                    s.show_error(&format!("\"{}\" already exists.", name));
+                    return;
+                }
+                match File::create(&new_path) {
+                    Ok(_) => {
+                        if let Some(folder) = s.open_folder.borrow().clone() {
+                            s.refresh_file_tree(&folder);
+                        }
+                        s.open_file(&new_path);
+                    }
+                    Err(e) => s.show_error(&format!("Could not create file:\n{}", e)),
+                }
+            }
+        });
+
+        dlg.show();
+    }
+
+    /// "Rename" — prompts for a new name and renames the right-clicked item.
+    fn ft_rename(&self) {
+        let target = match self.context_menu_target.borrow().clone() {
+            Some(p) => p,
+            None => return,
+        };
+        let old_name =
+            target.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+
+        let dlg = gtk::Dialog::new();
+        dlg.set_title(Some("Rename"));
+        dlg.set_transient_for(Some(&self.ui.window));
+        dlg.set_modal(true);
+
+        let vbox = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        vbox.set_margin_top(12);
+        vbox.set_margin_bottom(12);
+        vbox.set_margin_start(12);
+        vbox.set_margin_end(12);
+
+        let lbl = gtk::Label::new(Some(&format!("Rename \"{}\" to:", old_name)));
+        lbl.set_halign(gtk::Align::Start);
+        let entry = gtk::Entry::new();
+        entry.set_text(&old_name);
+        // Pre-select the stem (everything before the last dot)
+        let sel_end = old_name.rfind('.').unwrap_or(old_name.len()) as i32;
+        entry.select_region(0, sel_end);
+        entry.set_activates_default(true);
+
+        vbox.append(&lbl);
+        vbox.append(&entry);
+        dlg.content_area().append(&vbox);
+
+        dlg.add_button("Cancel", gtk::ResponseType::Cancel);
+        let btn_ok = dlg.add_button("Rename", gtk::ResponseType::Ok);
+        btn_ok.add_css_class("suggested-action");
+        dlg.set_default_response(gtk::ResponseType::Ok);
+
+        dlg.connect_response({
+            let s = self.clone();
+            let entry = entry.clone();
+            let target = target.clone();
+            let old_name = old_name.clone();
+            move |dlg, resp| {
+                dlg.close();
+                if resp != gtk::ResponseType::Ok {
+                    return;
+                }
+                let new_name = entry.text().to_string().trim().to_string();
+                if new_name.is_empty() || new_name == old_name {
+                    return;
+                }
+                let new_path = target.parent().unwrap().join(&new_name);
+                if new_path.exists() {
+                    s.show_error(&format!("\"{}\" already exists.", new_name));
+                    return;
+                }
+                match fs::rename(&target, &new_path) {
+                    Ok(_) => {
+                        // Keep window title consistent if we renamed the open file.
+                        if s.file.borrow().as_deref() == Some(target.as_path()) {
+                            s.set_filename(&new_path);
+                        }
+                        if let Some(folder) = s.open_folder.borrow().clone() {
+                            s.refresh_file_tree(&folder);
+                        }
+                    }
+                    Err(e) => s.show_error(&format!("Could not rename:\n{}", e)),
+                }
+            }
+        });
+
+        dlg.show();
+    }
+
+    /// "Delete" — confirms and deletes the right-clicked file or directory.
+    fn ft_delete(&self) {
+        let target = match self.context_menu_target.borrow().clone() {
+            Some(p) => p,
+            None => return,
+        };
+        let name = target.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+
+        let dlg = gtk::MessageDialog::new(
+            Some(&self.ui.window),
+            gtk::DialogFlags::MODAL | gtk::DialogFlags::DESTROY_WITH_PARENT,
+            gtk::MessageType::Warning,
+            gtk::ButtonsType::None,
+            &format!("Delete \"{}\"?", name),
+        );
+        dlg.set_secondary_text(Some("This cannot be undone."));
+        dlg.add_button("Cancel", gtk::ResponseType::Cancel);
+        let btn_del = dlg.add_button("Delete", gtk::ResponseType::Accept);
+        btn_del.add_css_class("destructive-action");
+
+        dlg.connect_response({
+            let s = self.clone();
+            move |dlg, resp| {
+                dlg.close();
+                if resp != gtk::ResponseType::Accept {
+                    return;
+                }
+                let result = if target.is_dir() {
+                    fs::remove_dir_all(&target)
+                } else {
+                    fs::remove_file(&target)
+                };
+                match result {
+                    Ok(_) => {
+                        // Clear editor if the deleted file was open.
+                        if s.file.borrow().as_deref() == Some(target.as_path()) {
+                            s.clear_file();
+                        }
+                        if let Some(folder) = s.open_folder.borrow().clone() {
+                            s.refresh_file_tree(&folder);
+                        }
+                    }
+                    Err(e) => s.show_error(&format!("Could not delete:\n{}", e)),
+                }
+            }
+        });
+
+        dlg.show();
+    }
+
+    /// Rebuild the file tree model from `folder` and refresh the view.
+    fn refresh_file_tree(&self, folder: &Path) {
+        let model = build_file_tree_model(folder);
+        self.ui.file_tree_view.set_model(Some(&model));
+        if let Some(model) = self.ui.file_tree_view.model() {
+            if let Some(iter) = model.iter_first() {
+                self.ui.file_tree_view.expand_row(&model.path(&iter), false);
+            }
+        }
+    }
+
+    /// Show a modal error dialog with the given message.
+    fn show_error(&self, msg: &str) {
+        let dlg = gtk::MessageDialog::new(
+            Some(&self.ui.window),
+            gtk::DialogFlags::MODAL | gtk::DialogFlags::DESTROY_WITH_PARENT,
+            gtk::MessageType::Error,
+            gtk::ButtonsType::Ok,
+            msg,
+        );
+        dlg.connect_response(|d, _| d.close());
+        dlg.show();
+    }
+
+    // ── Original methods (unchanged below) ───────────────────────────────────
 
     fn btn_open_folder_clicked(&self) {
         let dlg = FileChooserDialog::new(
@@ -357,6 +655,7 @@ impl MainWindow {
         }
         css_combo_to_flat(&self.ui.outline_widget);
     }
+
     pub fn show(&self) {
         self.ui.window.show();
         self.ui.text_view.grab_focus();
@@ -425,11 +724,17 @@ impl MainWindow {
             self.ui
                 .window
                 .set_title(Some(format!("{} - {}", APP_NAME, filename.to_str().unwrap()).as_str()));
+            // show just the filename, full path on hover
+            let full = filename.to_str().unwrap_or("");
+            let name = filename.file_name().and_then(|n| n.to_str()).unwrap_or(full);
+            self.ui.lbl_current_file.set_text(name);
+            self.ui.lbl_current_file.set_tooltip_text(Some(full));
         } else {
             self.ui.window.set_title(Some(APP_NAME));
+            self.ui.lbl_current_file.set_text("");
+            self.ui.lbl_current_file.set_tooltip_text(None);
         }
     }
-
     fn btn_open_clicked(&self) {
         let dlg = FileChooserDialog::new(
             Some("Open File"),

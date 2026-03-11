@@ -22,6 +22,8 @@ use crate::app::App;
 use std::env::args;
 
 fn main() {
+    unsafe { std::env::set_var("GSK_RENDERER", "cairo") };
+
     let app = App::new();
     app.run(&args().collect::<Vec<_>>());
 }

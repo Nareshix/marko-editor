@@ -34,6 +34,19 @@ Document is
 ```
 will improve usoing ropey later
 
+
+non-md features
+multi column markdown? (decide on syntax later)
+---column---
+- Item 1
+- Item 2
+- Item 3
+---column---
+This text will now appear on the right side of the list!
+You can add more lists or paragraphs here.
+---end-column---
+
+
 # Penora
 
 Penora is a simple WYSIWYG editor for note taking written in Rust and GTK 4. It uses Markdown as storage format and can read simple Markdown files. However, the main focus of Marko Editor is WYSIWYG note taking and not being a 100% compliant Markdown editor.
